@@ -1,0 +1,43 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="256" height="256" rx="44" ry="44" fill="#0A0A0A"/>
+
+  <!-- Blue glow behind K -->
+  <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+    <feGaussianBlur stdDeviation="8" result="blur"/>
+    <feFlood flood-color="#1783FF" flood-opacity="0.5"/>
+    <feComposite in2="blur" operator="in"/>
+    <feMerge>
+      <feMergeNode/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+
+  <!--
+    Letter K with rounded line caps.
+    Vertical stem + two diagonals from the middle.
+    All strokes use round line-cap for a soft, modern feel.
+  -->
+  <g filter="url(#glow)">
+    <!-- Vertical stem: (100,55) to (100,165) -->
+    <line x1="100" y1="55" x2="100" y2="165"
+          stroke="#FFFFFF" stroke-width="16" stroke-linecap="round"/>
+
+    <!-- Upper diagonal: from mid-stem (100,108) to upper-right (168,60) -->
+    <line x1="100" y1="108" x2="168" y2="60"
+          stroke="#FFFFFF" stroke-width="14" stroke-linecap="round"/>
+
+    <!-- Lower diagonal: from mid-stem (100,108) to lower-right (168,162) -->
+    <line x1="100" y1="108" x2="168" y2="162"
+          stroke="#FFFFFF" stroke-width="14" stroke-linecap="round"/>
+  </g>
+
+  <!-- Progress bar track -->
+  <rect x="64" y="200" width="128" height="10" rx="5" ry="5" fill="#282828"/>
+
+  <!-- Progress bar fill (~60%) -->
+  <rect x="64" y="200" width="77" height="10" rx="5" ry="5" fill="#1783FF"/>
+
+  <!-- Online status dot -->
+  <circle cx="210" cy="205" r="6" fill="#4EC9B0"/>
+</svg>

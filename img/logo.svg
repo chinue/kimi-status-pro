@@ -1,0 +1,47 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="256" height="256" rx="44" ry="44" fill="#0A0A0A"/>
+
+  <!--
+    Moon with dark side (月之暗面).
+    A white circle representing the lit hemisphere,
+    overlapped by a dark blue-gray ellipse (offset right)
+    representing the shadowed hemisphere.
+  -->
+
+  <!-- Moon base (full moon, white) -->
+  <circle cx="128" cy="105" r="54" fill="#FFFFFF"/>
+
+  <!--
+    Shadow ellipse (dark side).
+    Offset to the right to create a waning crescent / gibbous phase.
+    Color: deep blue-gray, not pure black — the "dark side" still exists.
+  -->
+  <ellipse cx="156" cy="103" rx="52" ry="52" fill="#0F1423"/>
+
+  <!--
+    Subtle terminator highlight:
+    a faint glow along the curve where light meets shadow.
+  -->
+  <path
+    d="M 128 51
+       A 54 54 0 0 1 128 159"
+    fill="none"
+    stroke="#B2D4FF"
+    stroke-width="2"
+    opacity="0.35"
+    stroke-linecap="round"
+  />
+
+  <!-- Blue outer glow (subtle) -->
+  <circle cx="128" cy="105" r="64" fill="#1783FF" opacity="0.12"/>
+
+  <!-- Progress bar track -->
+  <rect x="64" y="200" width="128" height="10" rx="5" ry="5" fill="#282828"/>
+
+  <!-- Progress bar fill (~60%) -->
+  <rect x="64" y="200" width="77" height="10" rx="5" ry="5" fill="#1783FF"/>
+
+  <!-- Online status dot -->
+  <circle cx="210" cy="205" r="6" fill="#4EC9B0"/>
+</svg>

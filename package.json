@@ -1,0 +1,107 @@
+{
+  "name": "kimi-status-pro",
+  "displayName": "KimiStatusPro",
+  "description": "Monitor Kimi Code quota usage in real-time",
+  "version": "0.4.0",
+  "publisher": "kayuii",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chinue/kimi-status-pro"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "icon": "img/logo.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kimiStatusPro.refresh",
+        "title": "KimiStatusPro: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "kimiStatusPro.signIn",
+        "title": "KimiStatusPro: Sign In (OAuth)",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "kimiStatusPro.signOut",
+        "title": "KimiStatusPro: Sign Out",
+        "icon": "$(sign-out)"
+      },
+      {
+        "command": "kimiStatusPro.setApiKey",
+        "title": "KimiStatusPro: Set API Key",
+        "icon": "$(key)"
+      },
+      {
+        "command": "kimiStatusPro.showDashboard",
+        "title": "KimiStatusPro: Show Dashboard",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "kimiStatusPro.togglePause",
+        "title": "KimiStatusPro: Toggle Pause",
+        "icon": "$(debug-pause)"
+      }
+    ],
+    "configuration": {
+      "title": "KimiStatusPro",
+      "properties": {
+        "kimiStatusPro.language": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "en",
+            "zh-CN"
+          ],
+          "default": "auto",
+          "description": "Display language (auto-detect or manual)"
+        },
+        "kimiStatusPro.refreshIntervalSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 30,
+          "description": "API refresh interval in seconds"
+        },
+        "kimiStatusPro.displayMode": {
+          "type": "string",
+          "enum": [
+            "percent",
+            "absolute"
+          ],
+          "default": "percent",
+          "description": "Status bar display mode"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "node esbuild.js --production",
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "test": "mocha --config .mocharc.json"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.11",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^16.18.0",
+    "@types/sinon": "^17.0.3",
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^3.9.1",
+    "chai": "^4.4.1",
+    "esbuild": "^0.19.0",
+    "mocha": "^10.2.0",
+    "sinon": "^17.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.0"
+  }
+}

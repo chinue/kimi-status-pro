@@ -1,0 +1,12 @@
+.git/
+node_modules/
+src/
+test/
+docs/
+.kimi/
+esbuild.js
+tsconfig.json
+tsconfig.test.json
+.mocharc.json
+*.code-workspace
+out/*.map
