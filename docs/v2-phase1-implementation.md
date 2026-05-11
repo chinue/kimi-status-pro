@@ -78,7 +78,8 @@ v2/
       { "command": "kimiStatusPro.signIn", "title": "KimiStatusPro: Sign In (OAuth)", "icon": "$(sign-in)" },
       { "command": "kimiStatusPro.signOut", "title": "KimiStatusPro: Sign Out", "icon": "$(sign-out)" },
       { "command": "kimiStatusPro.setApiKey", "title": "KimiStatusPro: Set API Key", "icon": "$(key)" },
-      { "command": "kimiStatusPro.showDashboard", "title": "KimiStatusPro: Show Dashboard", "icon": "$(graph)" }
+      { "command": "kimiStatusPro.showDashboard", "title": "KimiStatusPro: Show Dashboard", "icon": "$(graph)" },
+      { "command": "kimiStatusPro.togglePause", "title": "KimiStatusPro: Toggle Pause", "icon": "$(debug-pause)" }
     ],
     "configuration": {
       "title": "KimiStatusPro",
@@ -138,9 +139,11 @@ export type LanguageSetting = 'auto' | 'en' | 'zh-CN';
 export interface AppState {
   quota: QuotaData | null;
   lastFetchAt: number | null;
+  lastSuccessfulFetchAt: number | null;
   error: string | null;
   authStatus: AuthStatus;
   dataSource: DataSource;
+  isLoading: boolean;
   ui: {
     displayMode: DisplayMode;
     language: LanguageSetting;
@@ -174,10 +177,13 @@ export type Action =
   | { type: 'CACHE_LOADED'; payload: QuotaData }
   | { type: 'API_SUCCESS'; payload: QuotaData }
   | { type: 'API_ERROR'; payload: { error: string; authFailed?: boolean } }
+  | { type: 'LOCAL_ESTIMATE'; payload: { weeklyPct: number; windowPct: number } }
   | { type: 'AUTH_STATUS'; payload: AuthStatus }
   | { type: 'UI_SET_DISPLAY_MODE'; payload: DisplayMode }
   | { type: 'UI_SET_LANGUAGE'; payload: LanguageSetting }
   | { type: 'UI_SET_PAUSED'; payload: boolean }
+  | { type: 'LOADING_START' }
+  | { type: 'LOADING_END' }
   | { type: 'SIGN_OUT' };
 ```
 
@@ -194,9 +200,11 @@ import { AppState, Action, AuthStatus } from './types';
 export const defaultState = (): AppState => ({
   quota: null,
   lastFetchAt: null,
+  lastSuccessfulFetchAt: null,
   error: null,
   authStatus: 'unknown',
   dataSource: 'no-data',
+  isLoading: false,
   ui: {
     displayMode: 'percent',
     language: 'auto',
@@ -218,20 +226,25 @@ function reducer(state: AppState, action: Action): AppState {
         error: null,
       };
 
-    case 'API_SUCCESS':
+    case 'API_SUCCESS': {
+      const now = Date.now();
       return {
         ...state,
         quota: action.payload,
-        lastFetchAt: Date.now(),
+        lastFetchAt: now,
+        lastSuccessfulFetchAt: now,
         dataSource: 'api',
         error: null,
         authStatus: state.authStatus === 'missing' ? 'authenticated' : state.authStatus,
+        isLoading: false,
       };
+    }
 
     case 'API_ERROR':
       return {
         ...state,
         error: action.payload.error,
+        isLoading: false,
         authStatus: action.payload.authFailed
           ? (state.authStatus === 'authenticated' ? 'expired' : 'failed')
           : state.authStatus,
@@ -248,6 +261,12 @@ function reducer(state: AppState, action: Action): AppState {
 
     case 'UI_SET_PAUSED':
       return { ...state, ui: { ...state.ui, isPaused: action.payload } };
+
+    case 'LOADING_START':
+      return { ...state, isLoading: true };
+
+    case 'LOADING_END':
+      return { ...state, isLoading: false };
 
     case 'SIGN_OUT':
       return {
@@ -417,11 +436,13 @@ export interface UtilizationResult {
   windowUtil: number;
   weeklyBar: string;
   windowBar: string;
+  weeklyMiniBar: string;
+  windowMiniBar: string;
 }
 
 export function computeUtilization(quota: QuotaData | null): UtilizationResult {
   if (!quota) {
-    return { weeklyPct: 0, windowPct: 0, weeklyUtil: 0, windowUtil: 0, weeklyBar: '', windowBar: '' };
+    return { weeklyPct: 0, windowPct: 0, weeklyUtil: 0, windowUtil: 0, weeklyBar: '', windowBar: '', weeklyMiniBar: '', windowMiniBar: '' };
   }
 
   const weeklyUtil = quota.weeklyLimit > 0 ? (quota.weeklyUsed / quota.weeklyLimit) : 0;
@@ -436,13 +457,19 @@ export function computeUtilization(quota: QuotaData | null): UtilizationResult {
     windowUtil,
     weeklyBar: buildBar(weeklyUtil, 10),
     windowBar: buildBar(windowUtil, 10),
+    weeklyMiniBar: buildMiniBar(weeklyUtil, 5),
+    windowMiniBar: buildMiniBar(windowUtil, 5),
   };
 }
 
 export function buildBar(util: number, width: number): string {
   const safe = Math.max(0, Math.min(1, isFinite(util) ? util : 0));
   const filled = Math.round(safe * width);
-  return '█'.repeat(filled) + '░'.repeat(width - filled);
+  return '\u25B0'.repeat(filled) + '\u25B1'.repeat(width - filled);
+}
+
+export function buildMiniBar(util: number, width = 5): string {
+  return buildBar(util, width);
 }
 
 export function formatPercent(pct: number, decimals = 0): string {
@@ -450,15 +477,27 @@ export function formatPercent(pct: number, decimals = 0): string {
   return safe.toFixed(decimals) + '%';
 }
 
+/** Format a percentage with fixed-width padding like C's %5.2f. */
+export function formatPercentPadded(pct: number, decimals = 2): string {
+  if (!isFinite(pct)) pct = 0;
+  return pct.toFixed(decimals).padStart(5, ' ') + '%';
+}
+
+export function fmtDuration(totalSeconds: number): string {
+  if (totalSeconds <= 0) return ' 0s';
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  const pad2 = (n: number) => String(n).padStart(2, ' ');
+  if (days > 0) return `${pad2(days)}d${pad2(hours)}h`;
+  if (hours > 0) return `${pad2(hours)}h${pad2(mins)}m`;
+  if (mins > 0) return `${pad2(mins)}m${pad2(secs)}s`;
+  return `${pad2(secs)}s`;
+}
+
 export function fmtHours(h: number): string {
-  if (h <= 0) return '0m';
-  const secs = Math.round(h * 3600);
-  const days = Math.floor(secs / 86400);
-  const hours = Math.floor((secs % 86400) / 3600);
-  const mins = Math.floor((secs % 3600) / 60);
-  if (days > 0) return `${days}d${hours}h`;
-  if (hours > 0) return `${hours}h${mins}m`;
-  return `${mins}m`;
+  return fmtDuration(Math.round(h * 3600));
 }
 ```
 
@@ -540,11 +579,139 @@ export function readKimiCliCredentials(): KimiOAuthCredentials | undefined {
 ## 10. services/authService.ts
 
 ```typescript
-import * as vscode from 'vscode';
-import { KimiOAuthCredentials } from '../types';
-import { readApiKey, readOAuth, writeOAuth, deleteOAuth, readKimiCliCredentials } from '../utils';
+// 🔀 Provider boundary: token resolution is Kimi-specific.
 
+import * as vscode from 'vscode';
+import fetch from 'node-fetch';
+import { KimiOAuthCredentials } from '../types';
+import { readApiKey, readOAuth, writeOAuth, deleteOAuth, readKimiCliCredentials, log } from '../utils';
+
+const CLIENT_ID = '17e5f671-d194-4dfb-9706-5516cb48c098';
+const OAUTH_HOST = 'https://auth.kimi.com';
+const DEVICE_CODE_PATH = '/api/oauth/device_authorization';
+const TOKEN_PATH = '/api/oauth/token';
 const REFRESH_THRESHOLD_SECONDS = 300;
+const HTTP_TIMEOUT_MS = 15_000;
+
+interface DeviceCodeResponse {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete?: string;
+  expires_in: number;
+  interval: number;
+}
+
+interface OAuthTokenWire {
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  scope?: string;
+  error?: string;
+  error_description?: string;
+}
+
+export interface AuthorizationPending { kind: 'pending'; }
+export interface AuthorizationFailed { kind: 'failed'; error: string; }
+export interface AuthorizationSuccess { kind: 'success'; creds: KimiOAuthCredentials; }
+export type PollOutcome = AuthorizationPending | AuthorizationFailed | AuthorizationSuccess;
+
+function commonHeaders(deviceId: string): Record<string, string> {
+  return {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Accept: 'application/json',
+    'X-Msh-Platform': 'kimi-status-pro-vscode',
+    'X-Msh-Version': '0.4.0',
+    'X-Msh-Device-Id': deviceId,
+  };
+}
+
+async function postForm(host: string, path: string, body: URLSearchParams, headers: Record<string, string>): Promise<{ status: number; body: string }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+  try {
+    const resp = await fetch(`${host}${path}`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Length': String(Buffer.byteLength(body.toString())) },
+      body: body.toString(),
+      signal: controller.signal,
+    });
+    const text = await resp.text();
+    return { status: resp.status, body: text };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function requestDeviceCode(deviceId: string): Promise<DeviceCodeResponse> {
+  const body = new URLSearchParams({ client_id: CLIENT_ID });
+  const { status, body: text } = await postForm(OAUTH_HOST, DEVICE_CODE_PATH, body, commonHeaders(deviceId));
+  if (status !== 200) {
+    throw new Error(`device_authorization failed: HTTP ${status} ${text.slice(0, 200)}`);
+  }
+  const parsed = JSON.parse(text) as DeviceCodeResponse;
+  if (!parsed.device_code || !parsed.user_code) {
+    throw new Error('device_authorization response missing required fields');
+  }
+  return parsed;
+}
+
+export async function exchangeDeviceCode(deviceId: string, deviceCode: string): Promise<PollOutcome> {
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID,
+    device_code: deviceCode,
+    grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+  });
+  const { body: text } = await postForm(OAUTH_HOST, TOKEN_PATH, body, commonHeaders(deviceId));
+  const wire = JSON.parse(text) as OAuthTokenWire;
+  if (wire.error === 'authorization_pending' || wire.error === 'slow_down') {
+    return { kind: 'pending' };
+  }
+  if (wire.error) {
+    return { kind: 'failed', error: `${wire.error}: ${wire.error_description ?? ''}`.trim() };
+  }
+  if (!wire.access_token) {
+    return { kind: 'failed', error: 'empty access_token in response' };
+  }
+  return { kind: 'success', creds: wireToCredentials(wire, deviceId) };
+}
+
+export async function refreshAccessToken(creds: KimiOAuthCredentials): Promise<KimiOAuthCredentials> {
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID,
+    grant_type: 'refresh_token',
+    refresh_token: creds.refreshToken,
+  });
+  const { status, body: text } = await postForm(OAUTH_HOST, TOKEN_PATH, body, commonHeaders(creds.deviceId));
+  if (status === 401 || status === 403) {
+    throw new Error(`refresh_token rejected (HTTP ${status})`);
+  }
+  if (status !== 200) {
+    throw new Error(`refresh failed: HTTP ${status} ${text.slice(0, 200)}`);
+  }
+  const wire = JSON.parse(text) as OAuthTokenWire;
+  if (!wire.access_token) {
+    throw new Error('empty access_token in refresh response');
+  }
+  return wireToCredentials(wire, creds.deviceId, creds.refreshToken);
+}
+
+function wireToCredentials(wire: OAuthTokenWire, deviceId: string, fallbackRefresh = ''): KimiOAuthCredentials {
+  const expiresIn = wire.expires_in ?? 0;
+  return {
+    accessToken: wire.access_token ?? '',
+    refreshToken: wire.refresh_token ?? fallbackRefresh,
+    tokenType: wire.token_type ?? 'Bearer',
+    expiresAt: expiresIn > 0 ? Math.floor(Date.now() / 1000) + Math.floor(expiresIn) : 0,
+    scope: wire.scope ?? 'kimi-code',
+    deviceId,
+  };
+}
+
+function newDeviceId(): string {
+  return crypto.randomUUID();
+}
 
 export class AuthService {
   private static instance: AuthService;
@@ -561,7 +728,7 @@ export class AuthService {
     this.secrets = secrets;
   }
 
-  /** 启动时调用一次，之后只在 token 失效时重新获取。缓存 60s 避免频繁读 SecretStorage。 */
+  /** Resolve token with 60s memory cache to avoid frequent SecretStorage reads. */
   async resolveToken(): Promise<string | undefined> {
     if (!this.secrets) return undefined;
     if (this.cachedToken && Date.now() - this.cachedAt < 60_000) {
@@ -598,30 +765,69 @@ export class AuthService {
 
     // Refresh token
     try {
-      const refreshed = await this.refreshAccessToken(creds);
+      const refreshed = await refreshAccessToken(creds);
       await writeOAuth(this.secrets, refreshed);
       this.cachedToken = refreshed.accessToken;
       this.cachedAt = Date.now();
       return refreshed.accessToken;
-    } catch {
+    } catch (err) {
+      log(`Refresh failed: ${(err as Error).message}. Clearing OAuth credentials.`);
       await deleteOAuth(this.secrets);
       this.invalidate();
       return undefined;
     }
   }
 
+  /** Start OAuth device code flow, open browser, poll for token. */
+  async startOAuthFlow(): Promise<boolean> {
+    if (!this.secrets) return false;
+
+    const deviceId = newDeviceId();
+    let deviceCodeResp: DeviceCodeResponse;
+    try {
+      deviceCodeResp = await requestDeviceCode(deviceId);
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Kimi sign-in failed: ${(err as Error).message}`);
+      return false;
+    }
+
+    const uri = deviceCodeResp.verification_uri_complete ?? deviceCodeResp.verification_uri;
+    void vscode.env.openExternal(vscode.Uri.parse(uri));
+    void vscode.window.showInformationMessage(
+      `Kimi sign-in: enter code "${deviceCodeResp.user_code}" in the browser if not automatically redirected.`
+    );
+
+    const expiresAt = Date.now() + (deviceCodeResp.expires_in * 1000);
+    const intervalMs = (deviceCodeResp.interval ?? 5) * 1000;
+
+    while (Date.now() < expiresAt) {
+      await sleep(intervalMs);
+      const outcome = await exchangeDeviceCode(deviceId, deviceCodeResp.device_code);
+      if (outcome.kind === 'success') {
+        await writeOAuth(this.secrets, outcome.creds);
+        this.invalidate();
+        void vscode.window.showInformationMessage('Kimi sign-in successful.');
+        return true;
+      }
+      if (outcome.kind === 'failed') {
+        void vscode.window.showErrorMessage(`Kimi sign-in failed: ${outcome.error}`);
+        return false;
+      }
+      // pending: continue polling
+    }
+
+    void vscode.window.showWarningMessage('Kimi sign-in timed out. Please try again.');
+    return false;
+  }
+
   invalidate(): void {
     this.cachedToken = null;
     this.cachedAt = 0;
   }
+}
 
-  private async refreshAccessToken(creds: KimiOAuthCredentials): Promise<KimiOAuthCredentials> {
-    // OAuth refresh 实现（同旧代码）
-    // POST https://auth.kimi.com/api/oauth/token
-    // body: grant_type=refresh_token&refresh_token=...&client_id=...
-    // 返回新 credentials
-    throw new Error('Not implemented in Phase 1');
-  }
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 ```
 
@@ -630,9 +836,10 @@ export class AuthService {
 ## 11. services/apiService.ts
 
 ```typescript
+import fetch from 'node-fetch';
 import { QuotaData, ApiResponse } from '../types';
 
-const API_BASE = 'https://api.kimi.com/v1';
+const API_URL = 'https://api.kimi.com/coding/v1/usages';
 
 export class ApiService {
   private static instance: ApiService;
@@ -644,10 +851,12 @@ export class ApiService {
 
   async fetchQuota(token: string): Promise<ApiResponse> {
     try {
-      const resp = await fetch(`${API_BASE}/quota`, {
+      const resp = await fetch(API_URL, {
+        method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'User-Agent': 'KimiStatusPro-vscode',
+          'User-Agent': 'KimiCLI/1.6',
+          'Accept': 'application/json',
         },
       });
 
@@ -662,28 +871,34 @@ export class ApiService {
       const data = this.parseResponse(json);
       return { ok: true, data };
     } catch (err) {
-      return { ok: false, error: (err as Error).message };
+      const msg = (err as Error).message;
+      const isNetwork = /fetch|network|ECONN|ENOTFOUND|ETIMEDOUT/i.test(msg);
+      return { ok: false, error: msg, networkError: isNetwork };
     }
   }
 
   private parseResponse(json: any): QuotaData {
-    // 根据实际 API 响应解析
-    // 示例结构（需根据实际 API 调整）：
-    const usage = json.usage || json.data || {};
-    const limits = json.limits || [];
-    const weekly = limits.find((l: any) => l.type === 'weekly') || {};
-    const window = limits.find((l: any) => l.type === 'window') || {};
+    // Mirrors the official Kimi API shape:
+    //   json.usage          -> weekly quota
+    //   json.limits[0].detail -> window quota
+    const usage = json.usage ?? {};
+    const win = json.limits?.[0]?.detail ?? {};
+
+    const weeklyLimit = toInt(usage.limit);
+    const weeklyUsed = toInt(usage.used);
+    const windowLimit = toInt(win.limit);
+    const windowUsed = toInt(win.used);
 
     return {
-      weeklyLimit: toInt(weekly.limit),
-      weeklyUsed: toInt(weekly.used),
-      weeklyUsedPct: toInt(weekly.used_pct),
-      weeklyResetAt: toMs(weekly.reset_time),
-      windowLimit: toInt(window.limit),
-      windowUsed: toInt(window.used),
-      windowRemaining: toInt(window.remaining),
-      windowUsedPct: toInt(window.used_pct),
-      windowResetAt: toMs(window.reset_time),
+      weeklyLimit,
+      weeklyUsed,
+      weeklyUsedPct: pctOrCompute(usage.used_pct, weeklyUsed, weeklyLimit),
+      weeklyResetAt: toMs(usage.resetTime),
+      windowLimit,
+      windowUsed,
+      windowRemaining: toInt(win.remaining),
+      windowUsedPct: pctOrCompute(win.used_pct, windowUsed, windowLimit),
+      windowResetAt: toMs(win.resetTime),
       parallelLimit: toInt(json.parallel?.limit),
     };
   }
@@ -692,6 +907,16 @@ export class ApiService {
 function toInt(v: any): number {
   const n = typeof v === 'number' ? v : parseInt(String(v), 10);
   return isNaN(n) ? 0 : n;
+}
+
+function pctOrCompute(pct: any, used: number, limit: number): number {
+  if (typeof pct === 'number' && !isNaN(pct)) return Math.min(100, Math.max(0, pct));
+  if (typeof pct === 'string') {
+    const n = parseFloat(pct);
+    if (!isNaN(n)) return Math.min(100, Math.max(0, n));
+  }
+  if (limit > 0) return Math.min(100, Math.max(0, (used / limit) * 100));
+  return 0;
 }
 
 function toMs(v: any): number {
@@ -829,9 +1054,12 @@ export class Scheduler {
       return;
     }
 
+    this.store.dispatch({ type: 'LOADING_START' });
+
     const token = await this.authService.resolveToken();
     if (!token) {
       this.store.dispatch({ type: 'AUTH_STATUS', payload: 'missing' });
+      this.store.dispatch({ type: 'LOADING_END' });
       return;
     }
 
@@ -846,7 +1074,7 @@ export class Scheduler {
     } else {
       this.store.dispatch({
         type: 'API_ERROR',
-        payload: { error: result.error ?? 'Unknown error', authFailed: result.authFailed },
+        payload: { error: result.error ?? 'Unknown error', authFailed: result.authFailed, networkError: result.networkError },
       });
 
       // 尝试回退到缓存
@@ -868,7 +1096,7 @@ import * as vscode from 'vscode';
 import { Store } from '../store';
 import { ConfigService } from '../config';
 import { makeT } from '../i18n';
-import { computeUtilization, formatPercent, fmtHours } from '../calc';
+import { computeUtilization, formatPercent, formatPercentPadded, fmtHours } from '../calc';
 import { AppState } from '../types';
 
 function utilizationToColor(util: number): string {
@@ -905,6 +1133,7 @@ export class StatusBarPresenter {
     try {
       if (state.authStatus === 'missing') {
         this.itemWeekly.text = '$(key) Kimi: sign in';
+        this.itemWeekly.command = 'kimiStatusPro.signIn';
         this.itemWeekly.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         this.itemWeekly.color = new vscode.ThemeColor('statusBarItem.errorForeground');
         this.itemWindow.hide();
@@ -913,6 +1142,7 @@ export class StatusBarPresenter {
 
       if (state.error && state.authStatus === 'failed') {
         this.itemWeekly.text = '$(warning) Kimi: auth failed';
+        this.itemWeekly.command = 'kimiStatusPro.signIn';
         this.itemWeekly.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         this.itemWindow.hide();
         return;
@@ -928,13 +1158,14 @@ export class StatusBarPresenter {
       const metrics = computeUtilization(state.quota);
 
       if (this.config.displayMode === 'absolute') {
-        this.itemWeekly.text = `🌘 ${state.quota.weeklyUsed}/${state.quota.weeklyLimit}`;
+        this.itemWeekly.text = `🌘 Kimi:${state.quota.weeklyUsed}/${state.quota.weeklyLimit}`;
         this.itemWindow.text = `5️⃣ ${state.quota.windowUsed}/${state.quota.windowLimit}`;
       } else {
-        this.itemWeekly.text = `🌘 ${formatPercent(metrics.weeklyPct, 1)}`;
-        this.itemWindow.text = `5️⃣ ${formatPercent(metrics.windowPct, 1)}`;
+        this.itemWeekly.text = `🌘 Kimi:${formatPercent(metrics.weeklyPct, 1)}`;
+        this.itemWindow.text = `5️⃣ ${metrics.windowMiniBar} ${formatPercent(metrics.windowPct, 1)}`;
       }
 
+      this.itemWeekly.command = 'kimiStatusPro.showDashboard';
       this.itemWeekly.color = utilizationToColor(metrics.weeklyUtil);
       this.itemWindow.color = utilizationToColor(metrics.windowUtil);
       this.itemWeekly.backgroundColor = undefined;
@@ -977,8 +1208,8 @@ export class StatusBarPresenter {
     md.appendMarkdown(`\`\`\`text\n`);
     md.appendMarkdown(`${t('tooltip.title')}${state.dataSource === 'stale' ? ' ' + t('tooltip.stale') : ''}\n`);
     md.appendMarkdown(`─────────────────────────────\n`);
-    md.appendMarkdown(`${t('tooltip.window5h')}  ${formatPercent(metrics.windowPct, 2)} [${metrics.windowBar}] ${t('tooltip.resetsIn')} ${windowReset}\n`);
-    md.appendMarkdown(`${t('tooltip.window7d')}  ${formatPercent(metrics.weeklyPct, 2)} [${metrics.weeklyBar}] ${t('tooltip.resetsIn')} ${weeklyReset}\n\n`);
+    md.appendMarkdown(`${t('tooltip.window5h')}  ${formatPercentPadded(metrics.windowPct, 2)} [${metrics.windowBar}] ${t('tooltip.resetsIn')} ${windowReset}\n`);
+    md.appendMarkdown(`${t('tooltip.window7d')}  ${formatPercentPadded(metrics.weeklyPct, 2)} [${metrics.weeklyBar}] ${t('tooltip.resetsIn')} ${weeklyReset}\n\n`);
 
     // Quota table
     md.appendMarkdown(`${t('tooltip.table.col.used')} | ${t('tooltip.table.col.limit')} | ${t('tooltip.table.col.remaining')}\n`);
@@ -1059,6 +1290,9 @@ export class DashboardPanel {
 
   private handleMessage(msg: any): void {
     switch (msg.type) {
+      case 'ready':
+        this.sendUpdate(this.store.getState());
+        break;
       case 'refresh':
         vscode.commands.executeCommand('kimiStatusPro.refresh');
         break;
@@ -1116,6 +1350,7 @@ export class DashboardPanel {
     .card-title { font-size: 0.75em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--vscode-descriptionForeground); margin: 0 0 10px 0; }
     .progress-row { margin-bottom: 10px; }
     .progress-labels { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 0.9em; }
+    .progress-meta { color: var(--vscode-descriptionForeground); font-size: 0.85em; margin-top: 2px; }
     .progress-track { height: 8px; background: var(--vscode-scrollbarSlider-background); border-radius: 4px; overflow: hidden; }
     .progress-fill { height: 100%; border-radius: 4px; background: var(--vscode-progressBar-background); transition: width 0.3s ease; }
     .progress-fill.warning { background: var(--vscode-editorWarning-foreground); }
@@ -1145,6 +1380,7 @@ export class DashboardPanel {
         <span id="lbl-5h">—</span>
       </div>
       <div class="progress-track"><div class="progress-fill" id="fill-5h" style="width:0%"></div></div>
+      <div class="progress-meta" id="meta-5h"></div>
     </div>
     <div class="progress-row">
       <div class="progress-labels">
@@ -1152,6 +1388,7 @@ export class DashboardPanel {
         <span id="lbl-7d">—</span>
       </div>
       <div class="progress-track"><div class="progress-fill" id="fill-7d" style="width:0%"></div></div>
+      <div class="progress-meta" id="meta-7d"></div>
     </div>
   </div>
 
@@ -1196,12 +1433,32 @@ export class DashboardPanel {
       document.getElementById('fill-7d').className = 'progress-fill' + (w7d >= 75 ? ' warning' : '');
       document.getElementById('lbl-7d').textContent = w7d.toFixed(1) + '%';
 
+      function fmtReset(ms) {
+        if (!ms || ms <= Date.now()) return '';
+        const totalSeconds = Math.max(0, Math.floor((ms - Date.now()) / 1000));
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const mins = Math.floor((totalSeconds % 3600) / 60);
+        const secs = totalSeconds % 60;
+        const pad2 = (n) => String(n).padStart(2, ' ');
+        if (days > 0) return 'resets in ' + pad2(days) + 'd' + pad2(hours) + 'h';
+        if (hours > 0) return 'resets in ' + pad2(hours) + 'h' + pad2(mins) + 'm';
+        if (mins > 0) return 'resets in ' + pad2(mins) + 'm' + pad2(secs) + 's';
+        return 'resets in ' + pad2(secs) + 's';
+      }
+
+      document.getElementById('meta-5h').textContent = fmtReset(quota.windowResetAt);
+      document.getElementById('meta-7d').textContent = fmtReset(quota.weeklyResetAt);
+
       const age = state.lastFetchAt
         ? Math.max(0, Math.floor((Date.now() - state.lastFetchAt) / 1000))
         : 0;
       const ageStr = age < 60 ? 'just now' : Math.floor(age / 60) + 'm ago';
       document.getElementById('footer').textContent = 'Last updated: ' + ageStr;
     });
+
+    // Notify extension that webview is ready to receive initial state
+    vscode.postMessage({ type: 'ready' });
   </script>
 </body>
 </html>`;
@@ -1260,10 +1517,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('kimiStatusPro.refresh', () => {
       scheduler.force();
     }),
-    vscode.commands.registerCommand('kimiStatusPro.signIn', () => {
-      // Phase 1: 简化版，直接弹出输入框输入 API Key
-      // Phase 2 再实现完整的 OAuth device flow
-      promptForApiKey(context);
+    vscode.commands.registerCommand('kimiStatusPro.signIn', async () => {
+      const success = await authService.startOAuthFlow();
+      if (success) {
+        scheduler.force();
+      }
     }),
     vscode.commands.registerCommand('kimiStatusPro.signOut', async () => {
       await context.secrets.delete('kimiStatusPro.apiKey');
@@ -1276,6 +1534,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.commands.registerCommand('kimiStatusPro.showDashboard', () => {
       DashboardPanel.createOrShow(store);
+    }),
+    vscode.commands.registerCommand('kimiStatusPro.togglePause', async () => {
+      const next = !store.getState().ui.isPaused;
+      store.dispatch({ type: 'UI_SET_PAUSED', payload: next });
+      await context.globalState.update('kimiStatusPro._pauseSignal', next);
     }),
   );
 

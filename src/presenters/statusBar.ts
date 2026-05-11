@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Store } from '../store';
 import { ConfigService } from '../config';
 import { makeT } from '../i18n';
-import { computeUtilization, formatPercent, fmtHours } from '../calc';
+import { computeUtilization, formatPercent, formatPercentPadded, fmtHours } from '../calc';
 import { AppState } from '../types';
 
 const STALE_THRESHOLD_MS = 120_000; // 2 minutes
@@ -39,6 +39,7 @@ export class StatusBarPresenter {
     this.itemPause = vscode.window.createStatusBarItem(alignment, 102);
     this.itemPause.name = 'KimiStatusPro Pause';
     this.itemPause.command = 'kimiStatusPro.togglePause';
+    this.itemPause.text = '\u23F8\uFE0F';
     this.itemPause.show();
 
     const unsub = store.subscribe((state) => this.render(state));
@@ -51,11 +52,12 @@ export class StatusBarPresenter {
   private render(state: AppState): void {
     try {
       // Pause item always visible
-      this.itemPause.text = state.ui.isPaused ? '$(play) \u23F8\uFE0F' : '$(debug-pause) \u23F8\uFE0F';
+      this.itemPause.text = '\u23F8\uFE0F';
       this.itemPause.tooltip = state.ui.isPaused ? 'Resume auto-refresh' : 'Pause auto-refresh';
 
       if (state.authStatus === 'missing') {
         this.itemWeekly.text = '$(key) Kimi: sign in';
+        this.itemWeekly.command = 'kimiStatusPro.signIn';
         this.itemWeekly.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         this.itemWeekly.color = new vscode.ThemeColor('statusBarItem.errorForeground');
         this.itemWindow.hide();
@@ -64,6 +66,7 @@ export class StatusBarPresenter {
 
       if (state.error && state.authStatus === 'failed') {
         this.itemWeekly.text = '$(warning) Kimi: auth failed';
+        this.itemWeekly.command = 'kimiStatusPro.signIn';
         this.itemWeekly.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         this.itemWindow.hide();
         return;
@@ -86,13 +89,14 @@ export class StatusBarPresenter {
         : '';
 
       if (this.config.displayMode === 'absolute') {
-        this.itemWeekly.text = `\uD83C\uDF18 ${state.quota.weeklyUsed}/${state.quota.weeklyLimit}${errorIndicator}`;
+        this.itemWeekly.text = `\uD83C\uDF18 Kimi:${state.quota.weeklyUsed}/${state.quota.weeklyLimit}${errorIndicator}`;
         this.itemWindow.text = `5\uFE0F\u20E3 ${state.quota.windowUsed}/${state.quota.windowLimit}${staleIndicator}`;
       } else {
-        this.itemWeekly.text = `\uD83C\uDF18 ${formatPercent(metrics.weeklyPct, 1)}${errorIndicator}`;
-        this.itemWindow.text = `5\uFE0F\u20E3 ${formatPercent(metrics.windowPct, 1)}${staleIndicator}`;
+        this.itemWeekly.text = `\uD83C\uDF18 Kimi:${formatPercent(metrics.weeklyPct, 1)}${errorIndicator}`;
+        this.itemWindow.text = `5\uFE0F\u20E3 ${metrics.windowMiniBar} ${formatPercent(metrics.windowPct, 1)}${staleIndicator}`;
       }
 
+      this.itemWeekly.command = 'kimiStatusPro.showDashboard';
       this.itemWeekly.color = utilizationToColor(metrics.weeklyUtil);
       this.itemWindow.color = utilizationToColor(metrics.windowUtil);
       this.itemWeekly.backgroundColor = undefined;
@@ -136,8 +140,8 @@ export class StatusBarPresenter {
     md.appendMarkdown(`\`\`\`text\n`);
     md.appendMarkdown(`${t('tooltip.title')}${sourceLabel}\n`);
     md.appendMarkdown(`${'─'.repeat(29)}\n`);
-    md.appendMarkdown(`${t('tooltip.window5h')}  ${formatPercent(metrics.windowPct, 2)} [${metrics.windowBar}] ${t('tooltip.resetsIn')} ${windowReset}\n`);
-    md.appendMarkdown(`${t('tooltip.window7d')}  ${formatPercent(metrics.weeklyPct, 2)} [${metrics.weeklyBar}] ${t('tooltip.resetsIn')} ${weeklyReset}\n\n`);
+    md.appendMarkdown(`${t('tooltip.window5h')}  ${formatPercentPadded(metrics.windowPct, 2)} [${metrics.windowBar}] ${t('tooltip.resetsIn')} ${windowReset}\n`);
+    md.appendMarkdown(`${t('tooltip.window7d')}  ${formatPercentPadded(metrics.weeklyPct, 2)} [${metrics.weeklyBar}] ${t('tooltip.resetsIn')} ${weeklyReset}\n\n`);
 
     md.appendMarkdown(`${t('tooltip.table.col.used')} | ${t('tooltip.table.col.limit')} | ${t('tooltip.table.col.remaining')}\n`);
     md.appendMarkdown(`5h: ${q.windowUsed} | ${q.windowLimit} | ${q.windowRemaining}\n`);

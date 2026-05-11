@@ -3,7 +3,7 @@ import * as crypto from 'crypto';
 import { Store } from '../store';
 import { ConfigService } from '../config';
 import { makeT } from '../i18n';
-import { computeUtilization, formatPercent } from '../calc';
+import { computeUtilization, formatPercent, fmtHours } from '../calc';
 
 export class DashboardPanel {
   private static instance: DashboardPanel | undefined;
@@ -47,6 +47,9 @@ export class DashboardPanel {
 
   private handleMessage(msg: any): void {
     switch (msg.type) {
+      case 'ready':
+        this.sendUpdate(this.store.getState());
+        break;
       case 'refresh':
         vscode.commands.executeCommand('kimiStatusPro.refresh');
         break;
@@ -105,6 +108,7 @@ export class DashboardPanel {
     .card-title { font-size: 0.75em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--vscode-descriptionForeground); margin: 0 0 10px 0; }
     .progress-row { margin-bottom: 10px; }
     .progress-labels { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 0.9em; }
+    .progress-meta { color: var(--vscode-descriptionForeground); font-size: 0.85em; margin-top: 2px; }
     .progress-track { height: 8px; background: var(--vscode-scrollbarSlider-background); border-radius: 4px; overflow: hidden; }
     .progress-fill { height: 100%; border-radius: 4px; background: var(--vscode-progressBar-background); transition: width 0.3s ease; }
     .progress-fill.warning { background: var(--vscode-editorWarning-foreground); }
@@ -134,6 +138,7 @@ export class DashboardPanel {
         <span id="lbl-5h">—</span>
       </div>
       <div class="progress-track"><div class="progress-fill" id="fill-5h" style="width:0%"></div></div>
+      <div class="progress-meta" id="meta-5h"></div>
     </div>
     <div class="progress-row">
       <div class="progress-labels">
@@ -141,6 +146,7 @@ export class DashboardPanel {
         <span id="lbl-7d">—</span>
       </div>
       <div class="progress-track"><div class="progress-fill" id="fill-7d" style="width:0%"></div></div>
+      <div class="progress-meta" id="meta-7d"></div>
     </div>
   </div>
 
@@ -187,12 +193,32 @@ export class DashboardPanel {
       fill7d.className = 'progress-fill' + (w7d >= 75 ? ' warning' : '');
       document.getElementById('lbl-7d').textContent = w7d.toFixed(1) + '%';
 
+      function fmtReset(ms) {
+        if (!ms || ms <= Date.now()) return '';
+        const totalSeconds = Math.max(0, Math.floor((ms - Date.now()) / 1000));
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const mins = Math.floor((totalSeconds % 3600) / 60);
+        const secs = totalSeconds % 60;
+        const pad2 = (n) => String(n).padStart(2, ' ');
+        if (days > 0) return 'resets in ' + pad2(days) + 'd' + pad2(hours) + 'h';
+        if (hours > 0) return 'resets in ' + pad2(hours) + 'h' + pad2(mins) + 'm';
+        if (mins > 0) return 'resets in ' + pad2(mins) + 'm' + pad2(secs) + 's';
+        return 'resets in ' + pad2(secs) + 's';
+      }
+
+      document.getElementById('meta-5h').textContent = fmtReset(quota.windowResetAt);
+      document.getElementById('meta-7d').textContent = fmtReset(quota.weeklyResetAt);
+
       const age = state.lastFetchAt
         ? Math.max(0, Math.floor((Date.now() - state.lastFetchAt) / 1000))
         : 0;
       const ageStr = age < 60 ? 'just now' : Math.floor(age / 60) + 'm ago';
       document.getElementById('footer').textContent = 'Last updated: ' + ageStr;
     });
+
+    // Notify extension that webview is ready to receive initial state
+    vscode.postMessage({ type: 'ready' });
   </script>
 </body>
 </html>`;

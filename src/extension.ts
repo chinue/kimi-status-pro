@@ -46,8 +46,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('kimiStatusPro.refresh', () => {
       scheduler.force();
     }),
-    vscode.commands.registerCommand('kimiStatusPro.signIn', () => {
-      promptForApiKey(context);
+    vscode.commands.registerCommand('kimiStatusPro.signIn', async () => {
+      const success = await authService.startOAuthFlow();
+      if (success) {
+        scheduler.force();
+      }
     }),
     vscode.commands.registerCommand('kimiStatusPro.signOut', async () => {
       await deleteApiKey(context.secrets);

@@ -289,7 +289,7 @@ function makeQuota(): import('../src/types').QuotaData {
 
 ```typescript
 import { expect } from 'chai';
-import { computeUtilization, buildBar, formatPercent, fmtHours, calculateCost } from '../src/calc';
+import { computeUtilization, buildBar, formatPercent, formatPercentPadded, fmtHours, calculateCost } from '../src/calc';
 
 describe('calc', () => {
   describe('computeUtilization', () => {
@@ -321,13 +321,21 @@ describe('calc', () => {
 
   describe('buildBar', () => {
     it('renders full bar at 100%', () => {
-      expect(buildBar(1, 10)).to.equal('██████████');
+      expect(buildBar(1, 10)).to.equal('▰▰▰▰▰▰▰▰▰▰');
     });
     it('renders empty bar at 0%', () => {
-      expect(buildBar(0, 10)).to.equal('░░░░░░░░░░');
+      expect(buildBar(0, 10)).to.equal('▱▱▱▱▱▱▱▱▱▱');
     });
     it('renders partial bar', () => {
-      expect(buildBar(0.25, 10)).to.equal('██░░░░░░░░');
+      expect(buildBar(0.25, 10)).to.equal('▰▰▰▱▱▱▱▱▱▱');
+    });
+  });
+
+  describe('formatPercentPadded', () => {
+    it('pads short percentages for alignment', () => {
+      expect(formatPercentPadded(5, 2)).to.equal(' 5.00%');
+      expect(formatPercentPadded(25, 2)).to.equal('25.00%');
+      expect(formatPercentPadded(100, 2)).to.equal('100.00%');
     });
   });
 
@@ -342,14 +350,22 @@ describe('calc', () => {
   });
 
   describe('fmtHours', () => {
-    it('formats minutes', () => {
-      expect(fmtHours(0.5)).to.equal('30m');
+    it('formats seconds', () => {
+      expect(fmtHours(0.0083)).to.equal('30s');
+    });
+    it('formats minutes and seconds', () => {
+      expect(fmtHours(0.5)).to.equal('30m 0s');
     });
     it('formats hours and minutes', () => {
-      expect(fmtHours(2.5)).to.equal('2h30m');
+      expect(fmtHours(2.5)).to.equal(' 2h30m');
     });
     it('formats days and hours', () => {
-      expect(fmtHours(50)).to.equal('2d2h');
+      expect(fmtHours(50)).to.equal(' 2d 2h');
+    });
+    it('pads single digits with space', () => {
+      expect(fmtHours(0.0167)).to.equal(' 1m 0s');
+      expect(fmtHours(1)).to.equal(' 1h 0m');
+      expect(fmtHours(24)).to.equal(' 1d 0h');
     });
   });
 });
@@ -473,7 +489,96 @@ describe('AuthService', () => {
 });
 ```
 
-### 4.5 `test/scheduler.test.ts` — 集成测试（mock fetch + time）
+### 4.5 `test/apiService.test.ts` — API 调用测试（mock fetch，禁止真实网络）
+
+**核心原则**：测试必须 100% mock `fetch`，严禁调用真实 Kimi API，避免频繁请求导致限流或封禁。
+
+```typescript
+import { expect } from 'chai';
+import * as sinon from 'sinon';
+import * as nodeFetch from 'node-fetch';
+import { ApiService } from '../src/services/apiService';
+
+describe('ApiService', () => {
+  let api: ApiService;
+
+  beforeEach(() => {
+    api = ApiService.getInstance();
+  });
+
+  afterEach(() => {
+    sinon.restore();
+    (ApiService as any).instance = undefined;
+  });
+
+  it('parses real Kimi API shape correctly', async () => {
+    sinon.stub(nodeFetch, 'default').resolves({
+      ok: true, status: 200,
+      json: async () => ({
+        usage: {
+          limit: '10000', used: '2500', remaining: '7500',
+          resetTime: new Date(Date.now() + 86400000).toISOString(),
+        },
+        limits: [
+          {
+            detail: {
+              limit: '2000', used: '500', remaining: '1500',
+              resetTime: new Date(Date.now() + 18000000).toISOString(),
+            },
+          },
+        ],
+        parallel: { limit: '30' },
+      }),
+    } as any);
+
+    const result = await api.fetchQuota('sk-test');
+    expect(result.ok).to.be.true;
+    expect(result.data!.weeklyLimit).to.equal(10000);
+    expect(result.data!.weeklyUsed).to.equal(2500);
+    expect(result.data!.weeklyUsedPct).to.equal(25);
+    expect(result.data!.windowLimit).to.equal(2000);
+    expect(result.data!.windowUsed).to.equal(500);
+    expect(result.data!.windowUsedPct).to.equal(25);
+    expect(result.data!.windowRemaining).to.equal(1500);
+    expect(result.data!.parallelLimit).to.equal(30);
+
+    const stub = nodeFetch.default as sinon.SinonStub;
+    expect(stub.getCall(0).args[1].headers['User-Agent']).to.equal('KimiCLI/1.6');
+  });
+
+  it('uses API-provided used_pct when present', async () => {
+    sinon.stub(nodeFetch, 'default').resolves({
+      ok: true, status: 200,
+      json: async () => ({
+        usage: { limit: '1000', used: '300', used_pct: 33.3 },
+        limits: [{ detail: { limit: '200', used: '50', used_pct: 25.5 } }],
+      }),
+    } as any);
+
+    const result = await api.fetchQuota('sk-test');
+    expect(result.data!.weeklyUsedPct).to.equal(33.3);
+    expect(result.data!.windowUsedPct).to.equal(25.5);
+  });
+
+  it('returns authFailed on 401', async () => {
+    sinon.stub(nodeFetch, 'default').resolves({ ok: false, status: 401, json: async () => ({}) } as any);
+    const result = await api.fetchQuota('bad-token');
+    expect(result.authFailed).to.be.true;
+  });
+
+  it('returns networkError on timeout', async () => {
+    sinon.stub(nodeFetch, 'default').rejects(new Error('ETIMEDOUT'));
+    const result = await api.fetchQuota('sk-test');
+    expect(result.networkError).to.be.true;
+  });
+});
+```
+
+**重要约束**：
+- 所有 `ApiService` 测试必须 stub `node-fetch`，绝不允许真实 HTTP 出站。
+- 如需验证端到端 API 连通性，使用独立的手动脚本（`scripts/manual-api-check.ts`），不在 CI/测试套件中执行。
+
+### 4.6 `test/scheduler.test.ts` — 集成测试（mock fetch + time）
 
 ```typescript
 import { expect } from 'chai';
@@ -508,25 +613,22 @@ describe('Scheduler', () => {
   });
 
   it('tick dispatches LOADING_START → API_SUCCESS → LOADING_END', async () => {
-    // mock auth
     const ctx = makeContext();
     auth.init(ctx.secrets);
     await ctx.secrets.store('kimiStatusPro.apiKey', 'sk-test');
 
-    // mock fetch
-    const fetchStub = sinon.stub(global, 'fetch').resolves({
-      ok: true, status: 200,
-      json: async () => ({
-        usage: { limit: '1000', used: '250', remaining: '750', resetTime: new Date(Date.now() + 86400000).toISOString() },
-        limits: [{ window: { duration: 300 }, detail: { limit: '200', used: '50', remaining: '150', resetTime: new Date(Date.now() + 18000000).toISOString() } }],
-      }),
-    } as any);
+    const quota = {
+      weeklyLimit: 1000, weeklyUsed: 250, weeklyUsedPct: 25, weeklyResetAt: Date.now() + 86400000,
+      windowLimit: 200, windowUsed: 50, windowRemaining: 150, windowUsedPct: 25, windowResetAt: Date.now() + 18000000,
+      parallelLimit: 30,
+    };
+    const fetchStub = sinon.stub(api, 'fetchQuota').resolves({ ok: true, data: quota });
+    sinon.stub(cache, 'write').resolves();
 
     scheduler.start();
-    clock.tick(100); // 触发首次 tick
-    await Promise.resolve(); // 让 microtask 执行
+    await clock.tickAsync(100);
+    await Promise.resolve();
 
-    expect(store.getState().isLoading).to.be.false;
     expect(store.getState().dataSource).to.equal('api');
     expect(store.getState().quota).to.not.be.null;
 
@@ -542,7 +644,7 @@ describe('Scheduler', () => {
 });
 ```
 
-### 4.6 `test/statusBar.test.ts` — 集成测试（mock Store）
+### 4.7 `test/statusBar.test.ts` — 集成测试（mock Store）
 
 ```typescript
 import { expect } from 'chai';

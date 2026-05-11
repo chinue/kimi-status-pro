@@ -348,6 +348,14 @@ class StatusBarPresenter {
   private render(state: AppState): void {
     if (state.authStatus === 'missing') {
       this.items.weekly.text = '$(key) Kimi: sign in';
+      this.items.weekly.command = 'kimiStatusPro.signIn';
+      this.items.window.hide();
+      return;
+    }
+
+    if (state.authStatus === 'failed') {
+      this.items.weekly.text = '$(warning) Kimi: auth failed';
+      this.items.weekly.command = 'kimiStatusPro.signIn';
       this.items.window.hide();
       return;
     }
@@ -362,18 +370,21 @@ class StatusBarPresenter {
     const metrics = computeUtilization(state.quota);
     this.items.weekly.text = `🌘 Kimi:${formatPercent(metrics.weeklyPct, 1)}`;
     this.items.window.text = `5️⃣ ${metrics.windowMiniBar} ${formatPercent(metrics.windowPct, 1)}`;
+    this.items.pause.text = '⏸️';
     this.items.weekly.show();
     this.items.window.show();
   }
 }
 ```
 
-**关键变化**：`render()` 是纯同步函数，不调用 `readOAuth()`、不构建 tooltip。Tooltip 通过单独的 `TooltipBuilder` 在鼠标悬停时懒构建。
+**关键变化**：`render()` 是纯同步函数，不调用 `readOAuth()`、不构建 tooltip。Tooltip 在 `statusBar.ts` 的 `buildTooltip()` 中通过 `vscode.MarkdownString` 直接构建，鼠标悬停时懒加载。
 
 ### 7.2 Dashboard
 
 - 打开时从 `store.getState()` 读取当前状态
 - 订阅 store 更新，通过 `postMessage` 推送
+- WebView 加载完成后发送 `ready` 消息，extension 立即推送当前状态，解决初始数据同步问题
+- 每个进度条下方显示 `resets in XhYm` 倒计时，数据来自 `quota.windowResetAt` / `quota.weeklyResetAt`
 - 内部使用独立的 `requestAnimationFrame` 节流渲染，不依赖外部 throttle
 
 ---
@@ -418,9 +429,8 @@ kimi-status-pro/
 │   │   ├── localUsageService.ts  # 本地 JSONL 扫描（独立 Service，不直接改状态）
 │   │   └── scheduler.ts      # 单一 setTimeout 调度器
 │   ├── presenters/
-│   │   ├── statusBar.ts      # 状态栏（纯渲染，无业务逻辑）
-│   │   ├── dashboard.ts      # 仪表盘 webview
-│   │   └── tooltipBuilder.ts # Tooltip 构建（懒加载）
+│   │   ├── statusBar.ts      # 状态栏 + Tooltip 构建（纯渲染，无业务逻辑）
+│   │   └── dashboard.ts      # 仪表盘 webview
 │   └── utils.ts              # 通用工具
 ├── test/
 │   └── ...                   # 单元测试

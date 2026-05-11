@@ -1,6 +1,7 @@
 // 🔀 Provider boundary: API format is Kimi-specific.
 // If adapting to another provider, replace this module.
 
+import fetch from 'node-fetch';
 import { QuotaData, ApiResponse } from '../types';
 
 const API_URL = 'https://api.kimi.com/coding/v1/usages';
@@ -15,11 +16,11 @@ export class ApiService {
 
   async fetchQuota(token: string): Promise<ApiResponse> {
     try {
-      const resp = await (globalThis as any).fetch(API_URL, {
+      const resp = await fetch(API_URL, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'User-Agent': 'KimiStatusPro-vscode',
+          'User-Agent': 'KimiCLI/1.6',
           'Accept': 'application/json',
         },
       });
@@ -42,23 +43,28 @@ export class ApiService {
   }
 
   private parseResponse(json: any): QuotaData {
-    // Normalize various possible response shapes from Kimi API.
-    const usage = json.usage ?? json.data ?? json ?? {};
-    const limits = json.limits ?? [];
-    const weekly = limits.find((l: any) => l.type === 'weekly') ?? {};
-    const window = limits.find((l: any) => l.type === 'window') ?? {};
+    // Mirrors the official Kimi API shape:
+    //   json.usage          -> weekly quota
+    //   json.limits[0].detail -> window quota
+    const usage = json.usage ?? {};
+    const win = json.limits?.[0]?.detail ?? {};
+
+    const weeklyLimit = toInt(usage.limit);
+    const weeklyUsed = toInt(usage.used);
+    const windowLimit = toInt(win.limit);
+    const windowUsed = toInt(win.used);
 
     return {
-      weeklyLimit: toInt(weekly.limit ?? usage.weekly_limit),
-      weeklyUsed: toInt(weekly.used ?? usage.weekly_used),
-      weeklyUsedPct: toInt(weekly.used_pct ?? usage.weekly_used_pct),
-      weeklyResetAt: toMs(weekly.reset_time ?? usage.weekly_reset_at),
-      windowLimit: toInt(window.limit ?? usage.window_limit),
-      windowUsed: toInt(window.used ?? usage.window_used),
-      windowRemaining: toInt(window.remaining ?? usage.window_remaining),
-      windowUsedPct: toInt(window.used_pct ?? usage.window_used_pct),
-      windowResetAt: toMs(window.reset_time ?? usage.window_reset_at),
-      parallelLimit: toInt(json.parallel?.limit ?? usage.parallel_limit),
+      weeklyLimit,
+      weeklyUsed,
+      weeklyUsedPct: pctOrCompute(usage.used_pct, weeklyUsed, weeklyLimit),
+      weeklyResetAt: toMs(usage.resetTime),
+      windowLimit,
+      windowUsed,
+      windowRemaining: toInt(win.remaining),
+      windowUsedPct: pctOrCompute(win.used_pct, windowUsed, windowLimit),
+      windowResetAt: toMs(win.resetTime),
+      parallelLimit: toInt(json.parallel?.limit),
     };
   }
 }
@@ -66,6 +72,16 @@ export class ApiService {
 function toInt(v: any): number {
   const n = typeof v === 'number' ? v : parseInt(String(v), 10);
   return isNaN(n) ? 0 : n;
+}
+
+function pctOrCompute(pct: any, used: number, limit: number): number {
+  if (typeof pct === 'number' && !isNaN(pct)) return Math.min(100, Math.max(0, pct));
+  if (typeof pct === 'string') {
+    const n = parseFloat(pct);
+    if (!isNaN(n)) return Math.min(100, Math.max(0, n));
+  }
+  if (limit > 0) return Math.min(100, Math.max(0, (used / limit) * 100));
+  return 0;
 }
 
 function toMs(v: any): number {
