@@ -38,10 +38,16 @@ export class ThemeColor {
 }
 
 export const window = {
-  createStatusBarItem: (_alignment?: number, _priority?: number) => ({
-    text: '', tooltip: '', color: undefined, backgroundColor: undefined,
-    command: undefined, name: '', show: () => {}, hide: () => {}, dispose: () => {}
-  }),
+  createStatusBarItem: (_alignment?: number, _priority?: number) => {
+    const item = {
+      text: '', tooltip: '', color: undefined, backgroundColor: undefined,
+      command: undefined, name: '', visible: false,
+      show: () => { item.visible = true; },
+      hide: () => { item.visible = false; },
+      dispose: () => {}
+    };
+    return item;
+  },
   createOutputChannel: (_name: string) => ({
     appendLine: () => {}, append: () => {}, clear: () => {}, show: () => {}, hide: () => {}, dispose: () => {}
   }),

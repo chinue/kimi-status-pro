@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.1.10] - 2026-05-12
+
+### Changed
+- **Pause button icon behavior** (`src/presenters/statusBar.ts`)
+  - When paused: shows 🌘 moon icon instead of ⏸️, and hides weekly/window data items
+  - When active: shows ⏸️ pause symbol
+
 ## [0.1.9] - 2026-05-12
 
 ### Fixed

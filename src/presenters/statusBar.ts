@@ -58,8 +58,8 @@ export class StatusBarPresenter {
   private render(state: AppState): void {
     try {
       const t = makeT(this.config.effectiveLanguage);
-      // Pause item always visible
-      this.itemPause.text = '\u23F8\uFE0F';
+      // Pause icon: moon when paused (to indicate dormant), pause symbol when active
+      this.itemPause.text = state.ui.isPaused ? '\uD83C\uDF18' : '\u23F8\uFE0F';
       this.itemPause.tooltip = state.ui.isPaused ? t('tooltip.resumeAutoRefresh') : t('tooltip.pauseAutoRefresh');
 
       // When paused, hide data items and show only pause button
