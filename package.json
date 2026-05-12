@@ -97,10 +97,17 @@
         },
         "kimiStatusPro.updateAnimationDurationMs": {
           "type": "number",
-          "default": 2000,
+          "default": 5000,
           "minimum": 500,
           "maximum": 10000,
           "description": "Duration of the moon update animation in milliseconds. Range: 500–10000. When new data arrives during animation, the timer resets."
+        },
+        "kimiStatusPro.updateAnimationIntervalMs": {
+          "type": "number",
+          "default": 300,
+          "minimum": 100,
+          "maximum": 2000,
+          "description": "Frame interval of the moon update animation in milliseconds. Range: 100–2000. Controls how fast the moon phases cycle."
         },
         "kimiStatusPro._pauseSignal": {
           "type": "number",

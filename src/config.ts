@@ -47,7 +47,11 @@ export class ConfigService {
   }
 
   get updateAnimationDurationMs(): number {
-    return Math.max(500, Math.min(10_000, this.cfg.get<number>('updateAnimationDurationMs', 2_000)));
+    return Math.max(500, Math.min(10_000, this.cfg.get<number>('updateAnimationDurationMs', 5_000)));
+  }
+
+  get updateAnimationIntervalMs(): number {
+    return Math.max(100, Math.min(2_000, this.cfg.get<number>('updateAnimationIntervalMs', 300)));
   }
 
   get effectiveLanguage(): 'en' | 'zh-CN' {

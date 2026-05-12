@@ -637,7 +637,7 @@ export const DEFAULT_PRICING: TokenPricing = {
 
 重构为 short/long 双 tick：
 
-- `doShortTick` 在扫描本地 JSONL 数据前 dispatch `LOADING_START`，完成后（含异常路径）dispatch `LOADING_END`，以触发状态栏月亮动画。
+- `doShortTick` 静默扫描本地 JSONL 数据，不 dispatch 加载状态（避免每 5 秒闪烁状态栏）。
 - `doLongTick` 保持原有加载状态管理。
 
 完整代码：
@@ -1129,10 +1129,14 @@ async function promptForApiKey(context: vscode.ExtensionContext): Promise<void> 
 
 ## 10. presenters/statusBar.ts
 
-Phase 2 扩展以支持 local-only 模式下的估算显示，并新增**月亮加载动画**：
+Phase 2 扩展以支持 local-only 模式下的估算显示，并新增**月亮更新动画**：
 
-- 当 `state.isLoading` 为 `true` 时（包括 `doShortTick` 本地数据扫描和 `doLongTick` API 请求），主图标 `itemWeekly` 以 🌕🌖🌗🌘 循环播放动画（每 500ms 切换一帧），文字显示为 `Kimi…`。
-- 加载完成后恢复原始主图标。
+- 动画触发条件：`weeklyPct` 或 `windowPct` 的实际数值发生变化（首次数据到达除外，直接显示数值）。
+- 动画播放时长可通过设置 `kimiStatusPro.updateAnimationDurationMs` 调整（默认 5000ms，范围 500–10000ms）。
+- 动画帧间隔可通过设置 `kimiStatusPro.updateAnimationIntervalMs` 调整（默认 300ms，范围 100–2000ms），控制月亮相位切换速度。
+- 动画期间 `itemWeekly` 以 🌕🌖🌗🌘 循环播放，同时显示实时百分比，例如 `🌕 Kimi:25.0%`。`itemWindow`（5h 窗口）保持可见，继续正常显示。
+- 动画播放期间若又有新数据变化，重置计时器继续播放，不重置帧索引。
+- 动画结束后恢复完整正常显示（含迷你条、错误/估算指示器等）。
 - `itemPause` 按钮在暂停状态下显示 🌕（表示休眠），活跃状态下显示 ⏸️。
 
 ```typescript

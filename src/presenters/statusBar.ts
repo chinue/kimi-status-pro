@@ -14,7 +14,7 @@ import { AppState } from '../types';
 const STALE_THRESHOLD_MS = 120_000; // 2 minutes
 
 const MOON_FRAMES = ['\uD83C\uDF15', '\uD83C\uDF16', '\uD83C\uDF17', '\uD83C\uDF18'];
-const MOON_ANIMATION_INTERVAL_MS = 500;
+// MOON_ANIMATION_INTERVAL_MS is now read from config.updateAnimationIntervalMs (default 300ms)
 
 function utilizationToColor(util: number): string {
   if (util < 0.20) return '#FFFFFF';
@@ -337,7 +337,7 @@ export class StatusBarPresenter {
       this.moonFrame = (this.moonFrame + 1) % MOON_FRAMES.length;
       const liveWeeklyPct = this.lastSeenWeeklyPct ?? 0;
       this.itemWeekly.text = `${MOON_FRAMES[this.moonFrame]} Kimi:${formatPercent(liveWeeklyPct, 1)}`;
-    }, MOON_ANIMATION_INTERVAL_MS);
+    }, this.config.updateAnimationIntervalMs);
 
     this.updateAnimTimeout = setTimeout(() => {
       this.stopUpdateAnimation();

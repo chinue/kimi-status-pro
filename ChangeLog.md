@@ -11,9 +11,10 @@
   - Fix: replaced `isLoading`-based trigger with data-change detection; existing animation timer is preserved and only the end-timeout is reset when new data arrives during playback
 
 ### Added
-- **Configurable update animation duration** (`src/config.ts`, `package.json`)
-  - New setting `kimiStatusPro.updateAnimationDurationMs` (default: 2000ms, range: 500–10000ms)
-  - Controls how long the moon animation plays when data changes; timer resets if another update arrives during playback
+- **Configurable update animation duration and interval** (`src/config.ts`, `package.json`)
+  - `kimiStatusPro.updateAnimationDurationMs` (default: 5000ms, range: 500–10000ms)
+  - `kimiStatusPro.updateAnimationIntervalMs` (default: 300ms, range: 100–2000ms)
+  - Controls how long and how fast the moon animation plays when data changes; timer resets if another update arrives during playback
 - **Keep itemWindow visible during moon animation** (`src/presenters/statusBar.ts`)
   - `itemWindow` (5h window) now stays visible and continues to show normal data while `itemWeekly` plays the moon animation
 
