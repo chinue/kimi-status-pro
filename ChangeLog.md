@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [0.1.11] - 2026-05-12
+
+### Added
+- **Moon loading animation for local data scan** (`src/presenters/statusBar.ts`, `src/services/scheduler.ts`)
+  - When `state.isLoading` is `true` (during both `doShortTick` local JSONL scan and `doLongTick` API fetch), the main status bar icon cycles through 🌕🌖🌗🌘 every 500ms
+  - Animation stops and original main icon is restored when loading completes
+- **`LOADING_START/LOADING_END` dispatch in `doShortTick`** (`src/services/scheduler.ts`)
+  - Wraps local usage scan with `try/finally` to guarantee loading state is cleared even on early return or exception
+
+### Changed
+- **Design document updated** (`docs/v2-phase2-implementation.md`)
+  - Added moon animation specification to `presenters/statusBar.ts` section
+  - Added `doShortTick` loading state dispatch note to `services/scheduler.ts` section
+
 ## [0.1.10] - 2026-05-12
 
 ### Changed

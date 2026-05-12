@@ -635,7 +635,12 @@ export const DEFAULT_PRICING: TokenPricing = {
 
 ## 7. services/scheduler.ts
 
-重构为 short/long 双 tick，完整代码：
+重构为 short/long 双 tick：
+
+- `doShortTick` 在扫描本地 JSONL 数据前 dispatch `LOADING_START`，完成后（含异常路径）dispatch `LOADING_END`，以触发状态栏月亮动画。
+- `doLongTick` 保持原有加载状态管理。
+
+完整代码：
 
 ```typescript
 // DESIGN: v2-phase2-implementation.md#servicesschedulerts
@@ -1124,7 +1129,11 @@ async function promptForApiKey(context: vscode.ExtensionContext): Promise<void> 
 
 ## 10. presenters/statusBar.ts
 
-Phase 2 扩展以支持 local-only 模式下的估算显示（其余同 Phase 1）：
+Phase 2 扩展以支持 local-only 模式下的估算显示，并新增**月亮加载动画**：
+
+- 当 `state.isLoading` 为 `true` 时（包括 `doShortTick` 本地数据扫描和 `doLongTick` API 请求），主图标 `itemWeekly` 以 🌕🌖🌗🌘 循环播放动画（每 500ms 切换一帧），文字显示为 `Kimi…`。
+- 加载完成后恢复原始主图标。
+- `itemPause` 按钮在暂停状态下显示 🌕（表示休眠），活跃状态下显示 ⏸️。
 
 ```typescript
 import * as vscode from 'vscode';

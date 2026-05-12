@@ -13,6 +13,9 @@ import { AppState } from '../types';
 
 const STALE_THRESHOLD_MS = 120_000; // 2 minutes
 
+const MOON_FRAMES = ['\uD83C\uDF15', '\uD83C\uDF16', '\uD83C\uDF17', '\uD83C\uDF18'];
+const MOON_ANIMATION_INTERVAL_MS = 500;
+
 function utilizationToColor(util: number): string {
   if (util < 0.20) return '#FFFFFF';
   if (util < 0.40) return '#FFFF80';
@@ -27,6 +30,8 @@ export class StatusBarPresenter {
   private itemPause: vscode.StatusBarItem;
   private config = ConfigService.getInstance();
   private disposables: vscode.Disposable[] = [];
+  private moonAnimationTimer: NodeJS.Timeout | null = null;
+  private moonFrame = 0;
 
   constructor(private store: Store) {
     const alignment = vscode.StatusBarAlignment.Right;
@@ -64,10 +69,19 @@ export class StatusBarPresenter {
 
       // When paused, hide data items and show only pause button
       if (state.ui.isPaused) {
+        this.stopMoonAnimation();
         this.itemWeekly.hide();
         this.itemWindow.hide();
         return;
       }
+
+      // Moon animation while loading (local data scan or API fetch)
+      if (state.isLoading) {
+        this.startMoonAnimation();
+        this.itemWindow.hide();
+        return;
+      }
+      this.stopMoonAnimation();
 
       if (state.authStatus === 'missing') {
         this.itemWeekly.text = '$(key) Kimi: sign in';
@@ -273,7 +287,26 @@ export class StatusBarPresenter {
     return md;
   }
 
+  private startMoonAnimation(): void {
+    if (this.moonAnimationTimer) return;
+    this.moonFrame = 0;
+    this.itemWeekly.text = `${MOON_FRAMES[0]} Kimi…`;
+    this.itemWeekly.show();
+    this.moonAnimationTimer = setInterval(() => {
+      this.moonFrame = (this.moonFrame + 1) % MOON_FRAMES.length;
+      this.itemWeekly.text = `${MOON_FRAMES[this.moonFrame]} Kimi…`;
+    }, MOON_ANIMATION_INTERVAL_MS);
+  }
+
+  private stopMoonAnimation(): void {
+    if (this.moonAnimationTimer) {
+      clearInterval(this.moonAnimationTimer);
+      this.moonAnimationTimer = null;
+    }
+  }
+
   dispose(): void {
+    this.stopMoonAnimation();
     this.itemWeekly.dispose();
     this.itemWindow.dispose();
     this.itemPause.dispose();
