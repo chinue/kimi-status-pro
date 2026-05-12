@@ -2,7 +2,7 @@
   "name": "kimi-status-pro",
   "displayName": "KimiStatusPro",
   "description": "Monitor Kimi Code quota usage in real-time",
-  "version": "0.0.2",
+  "version": "0.1.6",
   "publisher": "kayuii",
   "license": "MIT",
   "repository": {
@@ -64,13 +64,20 @@
             "zh-CN"
           ],
           "default": "auto",
-          "description": "Display language (auto-detect or manual)"
+          "description": "Display language. Options: auto (detect from VS Code), en, zh-CN."
         },
         "kimiStatusPro.refreshIntervalSeconds": {
           "type": "number",
           "default": 60,
           "minimum": 30,
-          "description": "API refresh interval in seconds"
+          "description": "API refresh interval in seconds. Range: 30–∞. Long tick fetches quota from API."
+        },
+        "kimiStatusPro.shortRefreshIntervalSeconds": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 60,
+          "description": "Local estimation refresh interval in seconds. Range: 1–60. Short tick reads local JSONL and estimates usage without API call."
         },
         "kimiStatusPro.displayMode": {
           "type": "string",
@@ -79,7 +86,14 @@
             "absolute"
           ],
           "default": "percent",
-          "description": "Status bar display mode"
+          "description": "Status bar display mode. percent: show percentage with mini bar. absolute: show used/limit count."
+        },
+        "kimiStatusPro.dataRetentionDays": {
+          "type": "number",
+          "default": 365,
+          "minimum": 30,
+          "maximum": 3650,
+          "description": "Local usage data retention period in days. Range: 30–3650. Older entries are discarded during scan."
         }
       }
     }

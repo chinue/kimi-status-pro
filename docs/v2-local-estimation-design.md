@@ -64,28 +64,47 @@ Kimi API 的配额接口有调用频率限制（5h 窗口约 1000 次，7d 窗�
 ### 2.3 读取策略
 
 ```typescript
+interface FileState {
+  mtimeMs: number;
+  size: number;
+  entries: UsageEntry[];
+}
+
 class LocalUsageService {
-  private cache: LocalUsageCache | null = null;
-  private cacheAt = 0;
-  private readonly CACHE_TTL_MS = 30_000; // 30 秒缓存
+  private fileStates = new Map<string, FileState>();
 
   async getLocalUsage(opts: {
     cycleStartMs?: number;
     weeklyResetAtMs?: number;
     windowResetAtMs?: number;
   }): Promise<LocalAggregatedUsage> {
-    if (this.cache && Date.now() - this.cacheAt < this.CACHE_TTL_MS) {
-      return this.cache;
+    return this.scanAllFiles(opts);
+  }
+
+  private async updateFileState(filePath: string): Promise<FileState> {
+    const existing = this.fileStates.get(filePath);
+    let stat: { mtimeMs: number; size: number };
+    try {
+      const s = await fs.stat(filePath);
+      stat = { mtimeMs: s.mtimeMs, size: s.size };
+    } catch {
+      return existing ?? { mtimeMs: 0, size: 0, entries: [] };
     }
-    this.cache = await this.scanAllFiles(opts);
-    this.cacheAt = Date.now();
-    return this.cache;
+    if (existing && existing.mtimeMs === stat.mtimeMs && existing.size === stat.size) {
+      return existing;
+    }
+    // 读取新增内容并解析
+    const entries = await this.readNewEntries(filePath, existing);
+    const next: FileState = { mtimeMs: stat.mtimeMs, size: stat.size, entries };
+    this.fileStates.set(filePath, next);
+    return next;
   }
 }
 ```
 
 **性能优化**：
-- 扫描前先用 `fs.stat` 过滤：只读取 `mtimeMs >= cutoff` 的文件
+- `fileStates` Map 增量更新：按文件路径缓存解析结果，通过 `mtimeMs + size` 检测文件变化
+- 文件未变化时直接复用缓存的 `entries`，避免重复解析
 - 所有文件并行读取：`Promise.all(filePaths.map(fp => readFile(fp)))`
 - 单文件增量读取：记录上次读取的 offset，只读新增内容
 - 去重：按 `message_id` 去重，避免同一消息被重复计数
@@ -99,7 +118,6 @@ class LocalUsageService {
 | 窗口 | 起始时间 | 说明 |
 |---|---|---|
 | 今日 | `todayStart = new Date().setHours(0,0,0,0)` | 本地时区 0 点 |
-| 24h | `now - 24 * 3600 * 1000` | 滚动 24 小时 |
 | 5h | `windowResetAtMs - 5 * 3600 * 1000` | 以 API 返回的 resetAt 为终点 |
 | 7d | `weeklyResetAtMs - 7 * 24 * 3600 * 1000` | 以 API 返回的 resetAt 为终点 |
 | 当前周期 | `cycleStartMs` | 由 `getCycleStartMs()` 计算 |
@@ -113,13 +131,13 @@ interface LocalAggregatedUsage {
   costToday: number;            // ¥
   requestsToday: number;        // 消息数
 
-  // 24h 滚动窗口
-  tokensIn24h: number;          // input_other
-  tokensOut24h: number;         // output
-  tokensCacheRead24h: number;   // input_cache_read
-  tokensCacheCreate24h: number; // input_cache_creation
-  cost24h: number;              // ¥
-  requests24h: number;
+  // 5h 窗口（以 windowResetAt 为终点）
+  tokensIn5h: number;           // input_other
+  tokensOut5h: number;          // output
+  tokensCacheRead5h: number;    // input_cache_read
+  tokensCacheCreate5h: number;  // input_cache_creation
+  cost5h: number;               // ¥
+  requests5h: number;
 
   // 7d 周期（以 weeklyResetAt 为终点）
   tokensIn7d: number;
@@ -128,9 +146,6 @@ interface LocalAggregatedUsage {
   tokensCacheCreate7d: number;
   cost7d: number;
   requests7d: number;
-
-  // 5h 窗口（以 windowResetAt 为终点）
-  cost5h: number;
 
   // 当前计费周期
   tokensThisCycle: number;      // input + output + cacheRead + cacheCreate
@@ -345,6 +360,7 @@ function fallbackWindowPct(
 API 可用且有效
   → 使用 API 返回的百分比（精确）
   → 同时进行校准
+  → **百分数平稳化**：若本地估算值四舍五入后的整数与 API 返回的整数一致，保留更精细的估算值；不一致时强制更新为 API 值
 
 API 不可用（限流/网络错误）
   → 使用本地估算
@@ -360,8 +376,8 @@ API 不可用（限流/网络错误）
 
 ```
 API_SUCCESS
-  → state.weeklyUsedPct = apiWeeklyUsedPct
-  → state.windowUsedPct = apiWindowUsedPct
+  → state.weeklyUsedPct = apiWeeklyUsedPct（经平稳化后可能保留本地小数估算）
+  → state.windowUsedPct = apiWindowUsedPct（经平稳化后可能保留本地小数估算）
   → state.dataSource = 'api'
   → 触发校准：tokenCapacity, windowCostCapacity
 
@@ -390,21 +406,21 @@ FIRST_LAUNCH (无缓存)
 
 ```typescript
 async function onShortTick(store: Store): Promise<void> {
-  // 1. 读取本地 JSONL（30s 缓存）
+  // 1. 读取本地 JSONL（fileStates 增量更新）
   const localUsage = await localUsageService.getLocalUsage({
-    weeklyResetAtMs: store.state.quota?.weeklyResetAt,
-    windowResetAtMs: store.state.quota?.windowResetAt,
+    weeklyResetAtMs: store.getState().quota?.weeklyResetAt,
+    windowResetAtMs: store.getState().quota?.windowResetAt,
   });
 
   // 2. 估算百分比
-  const tokenCapacity = store.state.localEstimate?.tokenCapacity;
-  const windowCostCapacity = store.state.localEstimate?.windowCostCapacity;
+  const tokenCapacity = store.getState().localEstimate?.tokenCapacity;
+  const windowCostCapacity = store.getState().localEstimate?.windowCostCapacity;
 
   const weeklyPct = estimateWeeklyPct(localUsage.tokensThisCycle, tokenCapacity)
-    ?? fallbackWeeklyPct(localUsage.tokensThisCycle, store.state.quota?.weeklyLimit);
+    ?? fallbackWeeklyPct(localUsage.tokensThisCycle, store.getState().quota?.weeklyLimit);
 
   const windowPct = estimateWindowPct(localUsage.cost5h, windowCostCapacity)
-    ?? fallbackWindowPct(localUsage.cost5h, store.state.quota?.windowLimit);
+    ?? fallbackWindowPct(localUsage.cost5h, store.getState().quota?.windowLimit);
 
   // 3. 更新状态
   store.dispatch({
@@ -452,6 +468,7 @@ async function onLongTick(store: Store, authService: AuthService): Promise<void>
     // 写入缓存
     await cacheService.write({
       quota: apiData,
+      fetchedAt: Date.now(),
       calibration: {
         tokenCapacity,
         windowCostCapacity,
@@ -461,13 +478,26 @@ async function onLongTick(store: Store, authService: AuthService): Promise<void>
       },
     });
 
+    // 百分数平稳化
+    const currentEstimate = store.getState().localEstimate;
+    let weeklyPct = apiData.weeklyUsedPct;
+    let windowPct = apiData.windowUsedPct;
+    if (currentEstimate) {
+      if (Math.round(currentEstimate.weeklyPct) === apiData.weeklyUsedPct) {
+        weeklyPct = currentEstimate.weeklyPct;
+      }
+      if (Math.round(currentEstimate.windowPct) === apiData.windowUsedPct) {
+        windowPct = currentEstimate.windowPct;
+      }
+    }
+
     // 更新状态
     store.dispatch({ type: 'API_SUCCESS', payload: apiData });
     store.dispatch({
       type: 'LOCAL_ESTIMATE',
       payload: {
-        weeklyPct: apiData.weeklyUsedPct,
-        windowPct: apiData.windowUsedPct,
+        weeklyPct,
+        windowPct,
         tokenCapacity,
         windowCostCapacity,
         calibratedAt: Date.now(),

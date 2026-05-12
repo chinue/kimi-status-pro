@@ -52,7 +52,7 @@ describe('ApiService', () => {
     expect(result.data!.parallelLimit).to.equal(30);
 
     // Verify User-Agent header
-    const stub = nodeFetch.default as sinon.SinonStub;
+    const stub = nodeFetch.default as unknown as sinon.SinonStub;
     const callArgs = stub.getCall(0).args[1];
     expect(callArgs.headers['User-Agent']).to.equal('KimiCLI/1.6');
   });

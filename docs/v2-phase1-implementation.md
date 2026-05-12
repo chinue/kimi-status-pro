@@ -95,6 +95,10 @@ v2/
         "kimiStatusPro.displayMode": {
           "type": "string", "enum": ["percent", "absolute"], "default": "percent",
           "description": "Status bar display mode"
+        },
+        "kimiStatusPro.shortRefreshIntervalSeconds": {
+          "type": "number", "default": 5, "minimum": 1, "maximum": 60,
+          "description": "Local estimate short refresh interval in seconds"
         }
       }
     }
@@ -350,6 +354,10 @@ export class ConfigService {
     return Math.max(30, this.cfg.get<number>('refreshIntervalSeconds', 60));
   }
 
+  get shortRefreshIntervalSeconds(): number {
+    return Math.max(1, Math.min(60, this.cfg.get<number>('shortRefreshIntervalSeconds', 5)));
+  }
+
   get effectiveLanguage(): 'en' | 'zh-CN' {
     const lang = this.language;
     if (lang === 'auto') {
@@ -489,15 +497,99 @@ export function fmtDuration(totalSeconds: number): string {
   const hours = Math.floor((totalSeconds % 86400) / 3600);
   const mins = Math.floor((totalSeconds % 3600) / 60);
   const secs = totalSeconds % 60;
-  const pad2 = (n: number) => String(n).padStart(2, ' ');
-  if (days > 0) return `${pad2(days)}d${pad2(hours)}h`;
-  if (hours > 0) return `${pad2(hours)}h${pad2(mins)}m`;
-  if (mins > 0) return `${pad2(mins)}m${pad2(secs)}s`;
-  return `${pad2(secs)}s`;
+  const padSpace = (n: number) => String(n).padStart(2, ' ');
+  const padZero = (n: number) => String(n).padStart(2, '0');
+  if (days > 0) return `${padSpace(days)}d${padZero(hours)}h`;
+  if (hours > 0) return `${padSpace(hours)}h${padZero(mins)}m`;
+  if (mins > 0) return `${padSpace(mins)}m${padZero(secs)}s`;
+  return `${padSpace(secs)}s`;
 }
 
 export function fmtHours(h: number): string {
   return fmtDuration(Math.round(h * 3600));
+}
+
+// --- CJK-aware border table drawing (reusable across tooltip/dashboard) ---
+
+type Align = 'l' | 'm' | 'r';
+
+function isCombiningMark(cp: number): boolean {
+  return (
+    (cp >= 0x0300 && cp <= 0x036F) ||
+    (cp >= 0x1AB0 && cp <= 0x1AFF) ||
+    (cp >= 0x1DC0 && cp <= 0x1DFF) ||
+    (cp >= 0x20D0 && cp <= 0x20FF) ||
+    (cp >= 0xFE20 && cp <= 0xFE2F)
+  );
+}
+
+function isWideChar(cp: number): boolean {
+  return (
+    (cp >= 0x1100 && cp <= 0x115F) ||
+    (cp >= 0x2329 && cp <= 0x232A) ||
+    (cp >= 0x2E80 && cp <= 0xA4CF) ||
+    (cp >= 0xAC00 && cp <= 0xD7A3) ||
+    (cp >= 0xF900 && cp <= 0xFAFF) ||
+    (cp >= 0xFE10 && cp <= 0xFE19) ||
+    (cp >= 0xFE30 && cp <= 0xFE6F) ||
+    (cp >= 0xFF00 && cp <= 0xFF60) ||
+    (cp >= 0xFFE0 && cp <= 0xFFE6) ||
+    (cp >= 0x20000 && cp <= 0x3FFFD)
+  );
+}
+
+export function displayWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (isCombiningMark(cp)) continue;
+    w += isWideChar(cp) ? 2 : 1;
+  }
+  return w;
+}
+
+export function padCell(s: string, width: number, align: Align): string {
+  const n = displayWidth(s);
+  const space = Math.max(0, width - n);
+  if (align === 'l') return s + ' '.repeat(space);
+  if (align === 'r') return ' '.repeat(space) + s;
+  const left = Math.floor(space / 2);
+  const right = space - left;
+  return ' '.repeat(left) + s + ' '.repeat(right);
+}
+
+export function drawBorderTable(
+  header: string[],
+  rows: string[][],
+  align: Align[],
+): string[] {
+  const colCount = header.length;
+  const widths = new Array<number>(colCount).fill(0);
+  for (let i = 0; i < colCount; i++) {
+    widths[i] = Math.max(widths[i], displayWidth(header[i] ?? ''));
+  }
+  for (const r of rows) {
+    for (let i = 0; i < colCount; i++) {
+      widths[i] = Math.max(widths[i], displayWidth(r[i] ?? ''));
+    }
+  }
+
+  function border(lineChar: '-' | '='): string {
+    return '+' + widths.map(w => lineChar.repeat(w + 2)).join('+') + '+';
+  }
+  function renderRow(cells: string[], a: Align[]): string {
+    return '|' + cells.map((c, i) => ' ' + padCell(c ?? '', widths[i], a[i] ?? 'm') + ' ').join('|') + '|';
+  }
+
+  const out: string[] = [];
+  out.push(border('-'));
+  out.push(renderRow(header, header.map(() => 'm')));
+  out.push(border('-'));
+  for (const r of rows) {
+    out.push(renderRow(r, align));
+  }
+  out.push(border('-'));
+  return out;
 }
 ```
 
@@ -1096,7 +1188,7 @@ import * as vscode from 'vscode';
 import { Store } from '../store';
 import { ConfigService } from '../config';
 import { makeT } from '../i18n';
-import { computeUtilization, formatPercent, formatPercentPadded, fmtHours } from '../calc';
+import { computeUtilization, formatPercent, formatPercentPadded, fmtHours, drawBorderTable } from '../calc';
 import { AppState } from '../types';
 
 function utilizationToColor(util: number): string {
@@ -1211,10 +1303,13 @@ export class StatusBarPresenter {
     md.appendMarkdown(`${t('tooltip.window5h')}  ${formatPercentPadded(metrics.windowPct, 2)} [${metrics.windowBar}] ${t('tooltip.resetsIn')} ${windowReset}\n`);
     md.appendMarkdown(`${t('tooltip.window7d')}  ${formatPercentPadded(metrics.weeklyPct, 2)} [${metrics.weeklyBar}] ${t('tooltip.resetsIn')} ${weeklyReset}\n\n`);
 
-    // Quota table
-    md.appendMarkdown(`${t('tooltip.table.col.used')} | ${t('tooltip.table.col.limit')} | ${t('tooltip.table.col.remaining')}\n`);
-    md.appendMarkdown(`5h: ${q.windowUsed} | ${q.windowLimit} | ${q.windowRemaining}\n`);
-    md.appendMarkdown(`7d: ${q.weeklyUsed} | ${q.weeklyLimit} | ${q.weeklyLimit - q.weeklyUsed}\n`);
+    // Quota table via drawBorderTable
+    const quotaHeader = ['', t('tooltip.table.col.used'), t('tooltip.table.col.limit'), t('tooltip.table.col.remaining')];
+    const quotaRows = [
+      [t('tooltip.window5h'), String(q.windowUsed), String(q.windowLimit), String(q.windowRemaining)],
+      [t('tooltip.window7d'), String(q.weeklyUsed), String(q.weeklyLimit), String(q.weeklyLimit - q.weeklyUsed)],
+    ];
+    md.appendMarkdown(drawBorderTable(quotaHeader, quotaRows, ['l', 'r', 'r', 'r']).join('\n'));
 
     if (q.parallelLimit) {
       md.appendMarkdown(`\nParallel: ${q.parallelLimit}\n`);
@@ -1235,9 +1330,18 @@ export class StatusBarPresenter {
 
 ---
 
-## 15. presenters/dashboard.ts（Phase 1 基础版）
+## 15. presenters/dashboard.ts（Phase 1 基础版 + 按钮交互完善）
 
-Phase 1 只实现最基础的功能：Header + Current Usage（进度条）+ Footer。Cost Curve、Detailed Usage、Usage History 留到 Phase 3。
+Phase 1 实现 Header + Current Usage（进度条）+ Footer，并完善四个按钮的交互逻辑。
+
+**按钮功能确认表**：
+
+| 按钮 | 行为 | 状态 |
+|---|---|---|
+| ↻ Refresh | 触发 `scheduler.force()` 立即刷新 | ✅ 生效，带 loading 禁用态 |
+| $ / % | 切换 `displayMode`（percent ↔ absolute） | ✅ 生效，进度条标签实时切换 |
+| 🌐 EN/中 | 切换 `language`（zh-CN ↔ en） | ✅ 生效，重建 HTML 更新全部文本 |
+| ⚙ Settings | 打开 VS Code 设置面板 | ✅ 生效 |
 
 ```typescript
 import * as vscode from 'vscode';
@@ -1245,15 +1349,16 @@ import * as crypto from 'crypto';
 import { Store } from '../store';
 import { ConfigService } from '../config';
 import { makeT } from '../i18n';
-import { computeUtilization, formatPercent, fmtHours } from '../calc';
+import { formatPercent, fmtDuration } from '../calc';
 
 export class DashboardPanel {
   private static instance: DashboardPanel | undefined;
   private panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
+  private nonce: string;
 
   private constructor(private store: Store) {
-    const nonce = crypto.randomBytes(16).toString('hex');
+    this.nonce = crypto.randomBytes(16).toString('hex');
     const config = ConfigService.getInstance();
     const locale = config.effectiveLanguage;
     const i18n = makeT(locale);
@@ -1265,7 +1370,7 @@ export class DashboardPanel {
       { enableScripts: true, retainContextWhenHidden: true }
     );
 
-    this.panel.webview.html = this.getHtml(nonce, locale);
+    this.panel.webview.html = this.getHtml(this.nonce, locale);
 
     this.panel.webview.onDidReceiveMessage(
       (msg) => this.handleMessage(msg),
@@ -1273,9 +1378,8 @@ export class DashboardPanel {
       this.disposables
     );
 
-    this.disposables.push(
-      store.subscribe((state) => this.sendUpdate(state))
-    );
+    const unsub = store.subscribe((state) => this.sendUpdate(state));
+    this.disposables.push({ dispose: unsub });
 
     this.panel.onDidDispose(() => this.dispose(), undefined, this.disposables);
   }
@@ -1296,17 +1400,21 @@ export class DashboardPanel {
       case 'refresh':
         vscode.commands.executeCommand('kimiStatusPro.refresh');
         break;
-      case 'toggleMode':
+      case 'toggleMode': {
         const next = ConfigService.getInstance().displayMode === 'percent' ? 'absolute' : 'percent';
-        ConfigService.getInstance().setDisplayMode(next);
+        void ConfigService.getInstance().setDisplayMode(next);
         break;
-      case 'toggleLanguage':
-        const nextLang = ConfigService.getInstance().effectiveLanguage === 'zh-CN' ? 'en' : 'zh-CN';
-        ConfigService.getInstance().setLanguage(nextLang);
-        // WebView 会收到配置变更通知后 reload
+      }
+      case 'toggleLanguage': {
+        const current = ConfigService.getInstance().effectiveLanguage;
+        const nextLang = current === 'zh-CN' ? 'en' : 'zh-CN';
+        void ConfigService.getInstance().setLanguage(nextLang as any);
+        // Rebuild HTML with new locale so all labels update immediately
+        this.panel.webview.html = this.getHtml(this.nonce, nextLang as any);
         break;
+      }
       case 'openSettings':
-        vscode.commands.executeCommand('workbench.action.openSettings', '@ext:kayuii.kimi-status-pro');
+        void vscode.commands.executeCommand('workbench.action.openSettings', '@ext:kayuii.kimi-status-pro');
         break;
     }
   }
@@ -1343,6 +1451,7 @@ export class DashboardPanel {
       border: none; padding: 4px 12px; cursor: pointer; border-radius: 2px; font-size: 0.9em;
     }
     button:hover { background: var(--vscode-button-hoverBackground); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
     .card {
       background: var(--vscode-sideBar-background); border: 1px solid var(--vscode-panel-border);
       border-radius: 4px; padding: 12px 16px; margin-bottom: 12px;
@@ -1351,12 +1460,14 @@ export class DashboardPanel {
     .progress-row { margin-bottom: 10px; }
     .progress-labels { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 0.9em; }
     .progress-meta { color: var(--vscode-descriptionForeground); font-size: 0.85em; margin-top: 2px; }
+    .progress-cost { color: var(--vscode-descriptionForeground); font-size: 0.85em; margin-top: 2px; }
     .progress-track { height: 8px; background: var(--vscode-scrollbarSlider-background); border-radius: 4px; overflow: hidden; }
     .progress-fill { height: 100%; border-radius: 4px; background: var(--vscode-progressBar-background); transition: width 0.3s ease; }
     .progress-fill.warning { background: var(--vscode-editorWarning-foreground); }
     .progress-fill.error { background: var(--vscode-editorError-foreground); }
     .footer { color: var(--vscode-descriptionForeground); font-size: 0.8em; margin-top: 8px; }
     .placeholder { color: var(--vscode-descriptionForeground); font-style: italic; }
+    .estimate-badge { font-size: 0.75em; color: var(--vscode-descriptionForeground); margin-left: 4px; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinning { display: inline-block; animation: spin 1s linear infinite; }
   </style>
@@ -1366,9 +1477,9 @@ export class DashboardPanel {
     <h1>${i18n('dashboard.title')}</h1>
     <div class="header-actions">
       <button id="btn-refresh">${i18n('dashboard.refresh')}</button>
-      <button id="btn-toggle">${i18n('dashboard.toggleMode')}</button>
-      <button id="btn-lang">🌐 ${isZh ? 'EN' : '中'}</button>
-      <button id="btn-settings">⚙</button>
+      <button id="btn-toggle">$ / %</button>
+      <button id="btn-lang">&#127760; ${isZh ? 'EN' : '中'}</button>
+      <button id="btn-settings">&#9881;</button>
     </div>
   </div>
 
@@ -1376,19 +1487,21 @@ export class DashboardPanel {
     <div class="card-title">${i18n('dashboard.currentUsage')}</div>
     <div class="progress-row">
       <div class="progress-labels">
-        <span>5h window</span>
+        <span>5h window<span id="badge-5h" class="estimate-badge"></span></span>
         <span id="lbl-5h">—</span>
       </div>
       <div class="progress-track"><div class="progress-fill" id="fill-5h" style="width:0%"></div></div>
       <div class="progress-meta" id="meta-5h"></div>
+      <div class="progress-cost" id="cost-5h"></div>
     </div>
     <div class="progress-row">
       <div class="progress-labels">
-        <span>7d window</span>
+        <span>7d window<span id="badge-7d" class="estimate-badge"></span></span>
         <span id="lbl-7d">—</span>
       </div>
       <div class="progress-track"><div class="progress-fill" id="fill-7d" style="width:0%"></div></div>
       <div class="progress-meta" id="meta-7d"></div>
+      <div class="progress-cost" id="cost-7d"></div>
     </div>
   </div>
 
@@ -1415,46 +1528,86 @@ export class DashboardPanel {
       if (msg.type !== 'update') return;
       const state = msg.state;
       const quota = state.quota;
+      const estimate = state.localEstimate;
+      const displayMode = state.ui.displayMode;
+      const isLoading = state.isLoading;
 
-      if (!quota) {
+      const hasApi = !!quota;
+      const hasEstimate = !!estimate;
+
+      // Refresh button loading state
+      const btnRefresh = document.getElementById('btn-refresh');
+      btnRefresh.disabled = isLoading;
+      btnRefresh.textContent = isLoading ? '${isZh ? '刷新中...' : 'Refreshing...'}' : '${i18n('dashboard.refresh')}';
+
+      // Toggle button label reflects current mode
+      const btnToggle = document.getElementById('btn-toggle');
+      btnToggle.textContent = displayMode === 'percent' ? '$ / %' : '% / $';
+
+      if (!hasApi && !hasEstimate) {
         document.getElementById('lbl-5h').textContent = 'Loading…';
         document.getElementById('lbl-7d').textContent = 'Loading…';
         return;
       }
 
-      const w5h = Math.min(100, (quota.windowUsedPct || 0));
-      const w7d = Math.min(100, (quota.weeklyUsedPct || 0));
+      const w5h = Math.min(100, hasApi ? (quota.windowUsedPct || 0) : (estimate.windowPct || 0));
+      const w7d = Math.min(100, hasApi ? (quota.weeklyUsedPct || 0) : (estimate.weeklyPct || 0));
 
-      document.getElementById('fill-5h').style.width = w5h + '%';
-      document.getElementById('fill-5h').className = 'progress-fill' + (w5h >= 75 ? ' warning' : '');
-      document.getElementById('lbl-5h').textContent = w5h.toFixed(1) + '%';
+      // Display mode: absolute (used/limit) or percent
+      if (displayMode === 'absolute' && quota) {
+        document.getElementById('lbl-5h').textContent = (quota.windowUsed || 0) + ' / ' + (quota.windowLimit || 0);
+        document.getElementById('lbl-7d').textContent = (quota.weeklyUsed || 0) + ' / ' + (quota.weeklyLimit || 0);
+      } else {
+        document.getElementById('lbl-5h').textContent = w5h.toFixed(1) + '%';
+        document.getElementById('lbl-7d').textContent = w7d.toFixed(1) + '%';
+      }
 
-      document.getElementById('fill-7d').style.width = w7d + '%';
-      document.getElementById('fill-7d').className = 'progress-fill' + (w7d >= 75 ? ' warning' : '');
-      document.getElementById('lbl-7d').textContent = w7d.toFixed(1) + '%';
+      const fill5h = document.getElementById('fill-5h');
+      fill5h.style.width = w5h + '%';
+      fill5h.className = 'progress-fill' + (w5h >= 75 ? ' warning' : '') + (w5h >= 90 ? ' error' : '');
+      document.getElementById('badge-5h').textContent = hasApi ? '' : ' (estimate)';
 
-      function fmtReset(ms) {
-        if (!ms || ms <= Date.now()) return '';
-        const totalSeconds = Math.max(0, Math.floor((ms - Date.now()) / 1000));
+      const fill7d = document.getElementById('fill-7d');
+      fill7d.style.width = w7d + '%';
+      fill7d.className = 'progress-fill' + (w7d >= 75 ? ' warning' : '') + (w7d >= 90 ? ' error' : '');
+      document.getElementById('badge-7d').textContent = hasApi ? '' : ' (estimate)';
+
+      // Inline fmtDuration in webview script (backend imports are not available in webview)
+      function fmtDuration(totalSeconds) {
+        if (totalSeconds <= 0) return ' 0s';
         const days = Math.floor(totalSeconds / 86400);
         const hours = Math.floor((totalSeconds % 86400) / 3600);
         const mins = Math.floor((totalSeconds % 3600) / 60);
         const secs = totalSeconds % 60;
-        const pad2 = (n) => String(n).padStart(2, ' ');
-        if (days > 0) return 'resets in ' + pad2(days) + 'd' + pad2(hours) + 'h';
-        if (hours > 0) return 'resets in ' + pad2(hours) + 'h' + pad2(mins) + 'm';
-        if (mins > 0) return 'resets in ' + pad2(mins) + 'm' + pad2(secs) + 's';
-        return 'resets in ' + pad2(secs) + 's';
+        const padSpace = (n) => String(n).padStart(2, ' ');
+        const padZero = (n) => String(n).padStart(2, '0');
+        if (days > 0) return padSpace(days) + 'd' + padZero(hours) + 'h';
+        if (hours > 0) return padSpace(hours) + 'h' + padZero(mins) + 'm';
+        if (mins > 0) return padSpace(mins) + 'm' + padZero(secs) + 's';
+        return padSpace(secs) + 's';
+      }
+      function fmtReset(ms) {
+        if (!ms || ms <= Date.now()) return '';
+        const totalSeconds = Math.max(0, Math.floor((ms - Date.now()) / 1000));
+        return 'resets in ' + fmtDuration(totalSeconds);
       }
 
-      document.getElementById('meta-5h').textContent = fmtReset(quota.windowResetAt);
-      document.getElementById('meta-7d').textContent = fmtReset(quota.weeklyResetAt);
+      document.getElementById('meta-5h').textContent = quota ? fmtReset(quota.windowResetAt) : '';
+      document.getElementById('meta-7d').textContent = quota ? fmtReset(quota.weeklyResetAt) : '';
+
+      // Cost display from localEstimate
+      const leCost = state.localEstimate;
+      const cost5hEl = document.getElementById('cost-5h');
+      const cost7dEl = document.getElementById('cost-7d');
+      if (cost5hEl) cost5hEl.textContent = leCost ? 'COST: ¥' + leCost.cost5h.toFixed(2) : '';
+      if (cost7dEl) cost7dEl.textContent = leCost ? 'COST: ¥' + leCost.cost7d.toFixed(2) : '';
 
       const age = state.lastFetchAt
         ? Math.max(0, Math.floor((Date.now() - state.lastFetchAt) / 1000))
         : 0;
       const ageStr = age < 60 ? 'just now' : Math.floor(age / 60) + 'm ago';
-      document.getElementById('footer').textContent = 'Last updated: ' + ageStr;
+      const sourceLabel = state.dataSource === 'local-only' ? ' · local estimate' : '';
+      document.getElementById('footer').textContent = 'Last updated: ' + ageStr + sourceLabel;
     });
 
     // Notify extension that webview is ready to receive initial state
@@ -1698,10 +1851,43 @@ User clicks signOut
 | Dashboard | WebView + 内联 HTML/JS | Phase 1 极简，Phase 3 再扩展 |
 | 认证 | API Key 为主，OAuth 为扩展 | Phase 1 先实现 API Key，OAuth 后续补充 |
 | 缓存 | JSON 文件（非 SQLite） | 简单、可手动查看、跨平台 |
+| 数据访问隔离 | 只有 Scheduler 读取磁盘（LocalUsageService + CacheService） | Presenters 禁止直接访问磁盘，必须从 store 读取 |
+| 本地数据更新 | 增量内存更新：`fileStates` Map 跟踪 mtime/size，变化时全量重读，未变化时复用内存 | 无 TTL 缓存，每次调用都检查文件变化；聚合数据实时更新 |
 
 ---
 
-## 22. 测试要点
+## 22. 可复用函数封装规范（强制）
+
+> **引用 Skill**: `.kimi/skills/reusable-format-functions/SKILL.md`
+
+所有可能被多处使用的格式化、计算、数据提取逻辑 **必须** 封装为纯函数，统一放在 `src/calc.ts`（或对应共享模块）。**严禁** 在 presenter 或服务中内联实现。
+
+### 已封装的函数清单
+
+| 函数 | 用途 | 禁止内联的场景 |
+|---|---|---|
+| `fmtDuration` | 格式化剩余时间（XXdYYh / XXhYYm / XXmYYs / ZZs） | dashboard tooltip、状态栏、任何显示倒计时的位置 |
+| `fmtHours` | 小时 → 格式化时长 | tooltip 重置时间、scheduler 日志 |
+| `fmtTokens` | token 数 → k/M 后缀 | tooltip 表格、dashboard 标签 |
+| `fmtCost` | 成本 → ¥XX.YY | tooltip 表格、dashboard cost 显示 |
+| `formatPercent` / `formatPercentPadded` | 百分比格式化 | 状态栏、tooltip、dashboard |
+| `buildBar` / `buildMiniBar` | ASCII 进度条 | 状态栏、tooltip |
+| `drawBorderTable` | CJK-aware 边框表格 | tooltip 配额表、本地用量表 |
+| `displayWidth` / `padCell` | 表格单元格宽度计算与对齐 | `drawBorderTable` 内部及任何需要对齐的文本 |
+
+### 违规示例
+
+```typescript
+// ❌ 禁止 — 在 presenter 中内联格式化
+const secs = totalSeconds % 60;
+const pad2 = (n) => String(n).padStart(2, ' ');
+return pad2(days) + 'd' + pad2(hours) + 'h';
+
+// ✅ 正确 — 调用 calc.ts 中的统一函数
+return fmtDuration(totalSeconds);
+```
+
+## 23. 测试要点
 
 | 测试项 | 方法 |
 |---|---|

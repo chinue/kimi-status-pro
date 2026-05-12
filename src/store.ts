@@ -8,6 +8,8 @@ export const defaultState = (): AppState => ({
   authStatus: 'unknown',
   dataSource: 'no-data',
   isLoading: false,
+  localEstimate: null,
+  // Phase 3: localUsage costs will be stored in localEstimate via dispatch
   ui: {
     displayMode: 'percent',
     language: 'auto',
@@ -53,9 +55,56 @@ function reducer(state: AppState, action: Action): AppState {
           : state.authStatus,
       };
 
-    case 'LOCAL_ESTIMATE':
-      // Phase 2: integrate local estimate into state
-      return state;
+    case 'LOCAL_ESTIMATE': {
+      const payload = action.payload;
+      const current = state.localEstimate;
+
+      // 如果 localEstimate 已存在，且 payload 中每个字段的值都与当前值严格相等，
+      // 则返回原 state 引用，Store 会跳过所有 listener（避免不必要的 UI 刷新）
+      if (
+        current &&
+        Object.keys(payload).every((k) => (payload as any)[k] === (current as any)[k])
+      ) {
+        return state;
+      }
+
+      const next: AppState = {
+        ...state,
+        localEstimate: current
+          ? { ...current, ...payload }
+          : {
+              weeklyPct: 0,
+              windowPct: 0,
+              tokenCapacity: null,
+              windowCostCapacity: null,
+              calibratedAt: null,
+              cost5h: 0,
+              cost7d: 0,
+              costToday: 0,
+              requestsToday: 0,
+              tokensToday: 0,
+              tokensIn5h: 0,
+              tokensOut5h: 0,
+              tokensCacheRead5h: 0,
+              tokensCacheCreate5h: 0,
+              requests5h: 0,
+              tokensIn7d: 0,
+              tokensOut7d: 0,
+              tokensCacheRead7d: 0,
+              tokensCacheCreate7d: 0,
+              requests7d: 0,
+              tokensThisCycle: 0,
+              costThisCycle: 0,
+              requestsThisCycle: 0,
+              ...payload,
+            },
+      };
+      // When we have a local estimate but no API quota yet, upgrade dataSource
+      if (!state.quota && next.localEstimate) {
+        next.dataSource = state.dataSource === 'no-data' ? 'local-only' : state.dataSource;
+      }
+      return next;
+    }
 
     case 'AUTH_STATUS':
       return { ...state, authStatus: action.payload };

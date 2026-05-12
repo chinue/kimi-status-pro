@@ -4,6 +4,7 @@ import { ConfigService } from './config';
 import { AuthService } from './services/authService';
 import { ApiService } from './services/apiService';
 import { CacheService } from './services/cacheService';
+import { LocalUsageService } from './services/localUsageService';
 import { Scheduler } from './services/scheduler';
 import { StatusBarPresenter } from './presenters/statusBar';
 import { DashboardPanel } from './presenters/dashboard';
@@ -19,6 +20,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const authService = AuthService.getInstance();
   const apiService = ApiService.getInstance();
   const cacheService = CacheService.getInstance();
+  const localUsageService = LocalUsageService.getInstance();
 
   authService.init(context.secrets);
 
@@ -32,13 +34,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const cached = await cacheService.read();
   if (cached) {
     store.dispatch({ type: 'CACHE_LOADED', payload: cached.quota });
+    // Restore calibration
+    if (cached.calibration) {
+      store.dispatch({
+        type: 'LOCAL_ESTIMATE',
+        payload: {
+          tokenCapacity: cached.calibration.tokenCapacity,
+          windowCostCapacity: cached.calibration.windowCostCapacity,
+          calibratedAt: cached.calibration.calibratedAt,
+        },
+      });
+    }
   }
 
   // 3. Initialize Presenters
   const statusBar = new StatusBarPresenter(store);
 
   // 4. Start scheduler
-  const scheduler = new Scheduler(store, authService, apiService, cacheService);
+  const scheduler = new Scheduler(store, authService, apiService, cacheService, localUsageService);
   scheduler.start();
 
   // 5. Register commands
@@ -56,6 +69,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await deleteApiKey(context.secrets);
       await deleteOAuth(context.secrets);
       authService.invalidate();
+      localUsageService.invalidate();
       store.dispatch({ type: 'SIGN_OUT' });
     }),
     vscode.commands.registerCommand('kimiStatusPro.setApiKey', () => {

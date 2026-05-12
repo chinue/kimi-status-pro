@@ -37,6 +37,14 @@ export class ConfigService {
     return Math.max(30, this.cfg.get<number>('refreshIntervalSeconds', 60));
   }
 
+  get shortRefreshIntervalSeconds(): number {
+    return Math.max(1, Math.min(60, this.cfg.get<number>('shortRefreshIntervalSeconds', 5)));
+  }
+
+  get dataRetentionDays(): number {
+    return Math.max(30, Math.min(3650, this.cfg.get<number>('dataRetentionDays', 365)));
+  }
+
   get effectiveLanguage(): 'en' | 'zh-CN' {
     const lang = this.language;
     if (lang === 'auto') {

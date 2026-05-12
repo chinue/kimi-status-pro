@@ -83,6 +83,51 @@ describe('Store', () => {
     store.dispatch({ type: 'INIT' });
     expect(called).to.equal(0);
   });
+
+  it('LOCAL_ESTIMATE sets localEstimate fields', () => {
+    const store = new Store();
+    store.dispatch({ type: 'LOCAL_ESTIMATE', payload: { weeklyPct: 62.5, windowPct: 30.1 } });
+    const s = store.getState();
+    expect(s.localEstimate).to.not.be.null;
+    expect(s.localEstimate!.weeklyPct).to.equal(62.5);
+    expect(s.localEstimate!.windowPct).to.equal(30.1);
+    expect(s.dataSource).to.equal('local-only');
+  });
+
+  it('LOCAL_ESTIMATE merges with existing estimate', () => {
+    const store = new Store();
+    store.dispatch({ type: 'LOCAL_ESTIMATE', payload: { weeklyPct: 50, windowPct: 20, tokenCapacity: 1000 } });
+    store.dispatch({ type: 'LOCAL_ESTIMATE', payload: { windowPct: 25 } });
+    expect(store.getState().localEstimate!.weeklyPct).to.equal(50);
+    expect(store.getState().localEstimate!.windowPct).to.equal(25);
+    expect(store.getState().localEstimate!.tokenCapacity).to.equal(1000);
+  });
+
+  it('LOCAL_ESTIMATE does not change dataSource when quota exists', () => {
+    const store = new Store();
+    store.dispatch({ type: 'API_SUCCESS', payload: makeQuota() });
+    store.dispatch({ type: 'LOCAL_ESTIMATE', payload: { weeklyPct: 70 } });
+    expect(store.getState().dataSource).to.equal('api');
+  });
+
+  it('LOCAL_ESTIMATE skips listener when all payload values unchanged', () => {
+    const store = new Store();
+    let calls = 0;
+    store.subscribe(() => calls++);
+    store.dispatch({ type: 'LOCAL_ESTIMATE', payload: { weeklyPct: 25, windowPct: 10 } });
+    expect(calls).to.equal(1);
+    store.dispatch({ type: 'LOCAL_ESTIMATE', payload: { weeklyPct: 25, windowPct: 10 } });
+    expect(calls).to.equal(1); // skipped
+  });
+
+  it('LOCAL_ESTIMATE fires listener when any payload value changes', () => {
+    const store = new Store();
+    let calls = 0;
+    store.subscribe(() => calls++);
+    store.dispatch({ type: 'LOCAL_ESTIMATE', payload: { weeklyPct: 25, windowPct: 10 } });
+    store.dispatch({ type: 'LOCAL_ESTIMATE', payload: { weeklyPct: 26, windowPct: 10 } });
+    expect(calls).to.equal(2);
+  });
 });
 
 function makeQuota(): QuotaData {

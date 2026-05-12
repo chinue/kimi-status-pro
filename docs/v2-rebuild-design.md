@@ -459,24 +459,36 @@ kimi-status-pro/
 
 ### Phase 1：MVP（核心功能，2-3 小时）
 
-- [ ] 状态栏显示 weekly/window 百分比
-- [ ] 每 60s 自动刷新 API
-- [ ] 磁盘缓存（启动时恢复）
-- [ ] OAuth + API Key 登录
-- [ ] 手动刷新命令
-- [ ] 基础仪表盘（显示百分比和进度条）
+> **实现文档**：`v2-phase1-implementation.md`
+
+- [x] 状态栏显示 weekly/window 百分比
+- [x] 每 60s 自动刷新 API
+- [x] 磁盘缓存（启动时恢复）
+- [x] OAuth + API Key 登录
+- [x] 手动刷新命令
+- [x] 基础仪表盘（显示百分比和进度条）
 
 ### Phase 2：本地估算（1 小时）
 
-- [ ] 本地 JSONL 扫描（异步，缓存 30s）
-- [ ] Token 容量校准
-- [ ] Short tick（5s）本地估算
+> **设计文档**：`v2-local-estimation-design.md`  
+> **实现文档**：`v2-phase2-implementation.md`
+
+- [x] 本地 JSONL 扫描（异步，缓存 30s）
+- [x] Token 容量校准
+- [x] Short tick（5s）本地估算
+- [x] 缓存持久化校准数据
+- [x] UI fallback 到本地估算
 
 ### Phase 3：高级功能（1-2 小时）
 
+> **设计文档**：`v2-dashboard-design.md`  
+> **实现文档**：`v2-phase3-implementation.md`（待开发）
+
 - [ ] 成本计算与显示
+- [ ] 费用变化曲线（5h + 7d）
 - [ ] 热力图 / 趋势图
 - [ ] 预算告警
+- [ ] 模型明细（多模型预留）
 - [ ] Session 监控（可选，默认关闭）
 
 ---

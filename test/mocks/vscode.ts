@@ -6,6 +6,8 @@ export class MemorySecretStorage {
   async get(key: string): Promise<string | undefined> { return this.data.get(key); }
   async store(key: string, value: string): Promise<void> { this.data.set(key, value); }
   async delete(key: string): Promise<void> { this.data.delete(key); }
+  keys(): Promise<string[]> { return Promise.resolve(Array.from(this.data.keys())); }
+  onDidChange = (_listener: any, _thisArgs?: any, _disposables?: any[]) => ({ dispose: () => {} });
 }
 
 export class MemoryMemento {

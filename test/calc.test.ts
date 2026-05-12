@@ -1,5 +1,9 @@
 import { expect } from 'chai';
-import { computeUtilization, buildBar, buildMiniBar, formatPercent, fmtHours, calculateCost } from '../src/calc';
+import {
+  computeUtilization, buildBar, buildMiniBar, formatPercent, fmtHours, fmtDuration, calculateCost,
+  calibrateTokenCapacity, calibrateWindowCostCapacity, estimateWeeklyPct, estimateWindowPct,
+  fallbackWeeklyPct, fallbackWindowPct, isCalibrationValid,
+} from '../src/calc';
 import { QuotaData, TokenPricing } from '../src/types';
 
 describe('calc', () => {
@@ -69,18 +73,118 @@ describe('calc', () => {
       expect(fmtHours(0.0083)).to.equal('30s'); // ~30 seconds
     });
     it('formats minutes and seconds', () => {
-      expect(fmtHours(0.5)).to.equal('30m 0s');
+      expect(fmtHours(0.5)).to.equal('30m00s');
     });
     it('formats hours and minutes', () => {
       expect(fmtHours(2.5)).to.equal(' 2h30m');
     });
     it('formats days and hours', () => {
-      expect(fmtHours(50)).to.equal(' 2d 2h');
+      expect(fmtHours(50)).to.equal(' 2d02h');
     });
-    it('pads single digits with space', () => {
-      expect(fmtHours(0.0167)).to.equal(' 1m 0s'); // ~1 minute
-      expect(fmtHours(1)).to.equal(' 1h 0m');
-      expect(fmtHours(24)).to.equal(' 1d 0h');
+    it('pads single digits correctly', () => {
+      expect(fmtHours(0.0167)).to.equal(' 1m00s'); // ~1 minute
+      expect(fmtHours(1)).to.equal(' 1h00m');
+      expect(fmtHours(24)).to.equal(' 1d00h');
+    });
+    it('pads seconds with space for single digit', () => {
+      expect(fmtDuration(7)).to.equal(' 7s');
+      expect(fmtDuration(0)).to.equal(' 0s');
+    });
+  });
+
+  describe('calibrateTokenCapacity', () => {
+    it('calculates capacity from API pct and local tokens', () => {
+      // 10M tokens at 62% -> capacity = 10M / 0.62 = ~16.13M
+      const cap = calibrateTokenCapacity(62, 10_000_000);
+      expect(cap).to.be.closeTo(16_129_032, 1);
+    });
+    it('returns null for zero API pct', () => {
+      expect(calibrateTokenCapacity(0, 10_000_000)).to.be.null;
+    });
+    it('returns null for zero local tokens', () => {
+      expect(calibrateTokenCapacity(62, 0)).to.be.null;
+    });
+  });
+
+  describe('calibrateWindowCostCapacity', () => {
+    it('calculates capacity from API pct and local cost', () => {
+      // ¥45.67 at 30% -> capacity = 45.67 / 0.30 = ~152.23
+      const cap = calibrateWindowCostCapacity(30, 45.67);
+      expect(cap).to.be.closeTo(152.23, 0.01);
+    });
+    it('returns null for zero API pct', () => {
+      expect(calibrateWindowCostCapacity(0, 45.67)).to.be.null;
+    });
+  });
+
+  describe('estimateWeeklyPct', () => {
+    it('estimates percentage from local tokens and capacity', () => {
+      // 10M tokens / 16.13M capacity = ~62%
+      const pct = estimateWeeklyPct(10_000_000, 16_129_032);
+      expect(pct).to.be.closeTo(62, 0.1);
+    });
+    it('caps at 100%', () => {
+      expect(estimateWeeklyPct(20_000_000, 16_129_032)).to.equal(100);
+    });
+    it('returns null without capacity', () => {
+      expect(estimateWeeklyPct(10_000_000, null)).to.be.null;
+    });
+  });
+
+  describe('estimateWindowPct', () => {
+    it('estimates percentage from local cost and capacity', () => {
+      const pct = estimateWindowPct(45.67, 152.23);
+      expect(pct).to.be.closeTo(30, 0.1);
+    });
+    it('returns null without capacity', () => {
+      expect(estimateWindowPct(45.67, null)).to.be.null;
+    });
+  });
+
+  describe('fallbackWeeklyPct', () => {
+    it('falls back to used/limit ratio', () => {
+      expect(fallbackWeeklyPct(250_000, 1_000_000)).to.equal(25);
+    });
+    it('returns 0 when limit is null', () => {
+      expect(fallbackWeeklyPct(250_000, null)).to.equal(0);
+    });
+  });
+
+  describe('fallbackWindowPct', () => {
+    it('falls back to used/limit ratio', () => {
+      expect(fallbackWindowPct(50, 200)).to.equal(25);
+    });
+    it('returns 0 when limit is null', () => {
+      expect(fallbackWindowPct(50, null)).to.equal(0);
+    });
+  });
+
+  describe('isCalibrationValid', () => {
+    it('returns true for fresh calibration matching resetAt', () => {
+      const resetAt = Date.now();
+      const valid = isCalibrationValid(
+        { tokenCapacity: 100, windowCostCapacity: 50, calibratedAt: Date.now(), resetAt },
+        resetAt,
+      );
+      expect(valid).to.be.true;
+    });
+    it('returns false when resetAt mismatches', () => {
+      const valid = isCalibrationValid(
+        { tokenCapacity: 100, windowCostCapacity: 50, calibratedAt: Date.now(), resetAt: 1000 },
+        2000,
+      );
+      expect(valid).to.be.false;
+    });
+    it('returns false when calibration is too old', () => {
+      const old = Date.now() - 8 * 24 * 3600 * 1000; // 8 days ago
+      const valid = isCalibrationValid(
+        { tokenCapacity: 100, windowCostCapacity: 50, calibratedAt: old, resetAt: 1000 },
+        1000,
+      );
+      expect(valid).to.be.false;
+    });
+    it('returns false for null calibration', () => {
+      expect(isCalibrationValid(null, 1000)).to.be.false;
     });
   });
 });
