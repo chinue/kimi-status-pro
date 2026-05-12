@@ -1,5 +1,34 @@
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-13
+
+### Added
+- **Phase 3: Dashboard full data visualization** (`src/presenters/dashboard.ts`, `src/services/historyService.ts`, `src/calc.ts`, `src/types.ts`, `src/config.ts`, `src/i18n.ts`)
+  - **Cost Curve** — interactive line chart showing cumulative cost over 5h or 7d windows; Chart.js-driven with smooth line-only rendering (no scatter overlay); dynamic X-axis labels adapt to window size (`HH:MM:SS` for 5h, `M.D-HH:MM` for 7d)
+  - **Pricing & Settings** — collapsible card displaying provider status, API health badge, data TTL, and direct "Edit Settings" link; mirrors `claude-status` pricing panel UX
+  - **Detailed Usage** — 6-tab drilldown (5h / 7d / 30d / Today / This Month / All Time) with Summary Grid (total tokens, cost, messages), Model Breakdown bar chart, and drilldown tables; click day/month rows to expand hourly/daily sub-tables
+  - **Usage History** — 90-day token heatmap with daily total color intensity (blue→red), per-model daily bar chart, range tabs (7d / 14d / 30d / 90d); dynamic model color mapping with no hardcoded model names
+- **HistoryService** (`src/services/historyService.ts`) — pure in-memory aggregation engine; zero disk IO; singleton pattern
+  - `buildDashboardAggregates()` — window filtering + bucket mapping for all time ranges
+  - `buildHeatmapData()` — daily rollup with per-model breakdown and cycle-based aggregations
+  - `buildCostCurveOptions()` / `buildCostCurve()` — cumulative cost curves with bucketed downsampling
+  - `aggregateHourlyForDate()` / `aggregateDailyForMonth()` — drilldown helpers
+- **Calc helpers** (`src/calc.ts`)
+  - `buildDailyBuckets()` / `buildHourlyBuckets()` — local-midnight aligned time buckets
+  - `fmtCostCurveTime()` / `heatmapColor()` / `fmtRmb()` / `fmtNumber()` — dashboard-specific formatting
+- **Store wiring** (`src/store.ts`, `src/services/scheduler.ts`)
+  - `usageEntries: UsageEntry[]` added to `AppState`; `LOCAL_ESTIMATE` payload carries raw entries
+  - Both short and long ticks dispatch entries into memory so presenters never read disk
+- **Dashboard configuration** (`src/config.ts`, `package.json`)
+  - `kimiStatusPro.weeklyBudget` — weekly budget warning threshold (0 = disabled)
+  - `kimiStatusPro.chartHeightRatio` — canvas height ratio (0.2–1.0)
+  - `kimiStatusPro.heatmapDays` — heatmap range (30–365 days)
+- **i18n** (`src/i18n.ts`) — 30+ new bilingual keys for all dashboard cards, tabs, tables, and heatmap labels
+
+### Tests
+- Added `test/historyService.test.ts` with 16 new tests covering aggregates, heatmap, cost curve, and drilldown functions
+- Test suite: 98 tests passing
+
 ## [0.1.12] - 2026-05-12
 
 ### Fixed
