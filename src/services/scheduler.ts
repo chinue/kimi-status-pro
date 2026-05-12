@@ -156,6 +156,7 @@ export class Scheduler {
         tokensThisCycle: localUsage.tokensThisCycle,
         costThisCycle: localUsage.costThisCycle,
         requestsThisCycle: localUsage.requestsThisCycle,
+        entries: localUsage.entries,
       },
     });
   }
@@ -253,6 +254,7 @@ export class Scheduler {
           tokensThisCycle: localUsage.tokensThisCycle,
           costThisCycle: localUsage.costThisCycle,
           requestsThisCycle: localUsage.requestsThisCycle,
+          entries: localUsage.entries,
         },
       });
     } else {
