@@ -160,7 +160,90 @@ Dashboard 的 WebView 无法直接导入后端模块。当前方案：
 
 ---
 
-## 6. 审查检查清单
+## 6. 异常防护与防崩溃规范
+
+**凡是可能引发异常的操作，必须添加 `try-catch` 或等效的错误处理机制，禁止裸抛异常导致扩展崩溃。**
+
+### 6.1 必须加 try-catch 的场景（强制）
+
+| 场景 | 示例 | 处理方式 |
+|---|---|---|
+| 磁盘 IO | `fs.readFileSync`、`fs.readdirSync` | `try-catch` + 返回安全默认值 |
+| 网络请求 | `fetch`、`axios`、HTTP API | `try-catch` + 降级到缓存或显示错误状态 |
+| JSON 解析 | `JSON.parse` | `try-catch` + 返回 `{}` / `[]` |
+| 正则匹配（动态输入）| `new RegExp(userInput)` | `try-catch` + 使用转义后的备用正则 |
+| 类型转换（外部数据）| `Number(x)`、`BigInt(x)` | 先校验再转换，异常时返回默认值 |
+| 数组/对象访问（不确定键）| `arr[i]`、`obj[key]` | 先做 `in` / `hasOwnProperty` 检查 |
+| 第三方库调用 | VS Code API、外部 npm 包 | `try-catch` + 记录日志，禁止向上抛 |
+
+### 6.2 防御性编程清单
+
+- **空值检查**：对函数参数、API 返回值、`store.getState()` 中的可选字段，使用 `??` 或 `?.` 提供默认值
+  ```typescript
+  // ✅ 正确
+  const usage = store.getState().localEstimate?.today ?? { inputTokens: 0, outputTokens: 0 };
+  // ❌ 错误
+  const usage = store.getState().localEstimate.today; // 可能 undefined 导致崩溃
+  ```
+
+- **边界检查**：数组索引、字符串 slice 前确认长度
+  ```typescript
+  // ✅ 正确
+  const item = i < arr.length ? arr[i] : fallback;
+  // ❌ 错误
+  const item = arr[i]; // i 可能越界
+  ```
+
+- **异步错误必须处理**：所有 Promise 必须 `await` 并包裹 `try-catch`，或至少附加 `.catch()`
+  ```typescript
+  // ✅ 正确
+  async function refresh() {
+    try { await api.fetch(); } catch (e) { log.error('refresh failed', e); }
+  }
+  // ❌ 错误
+  api.fetch(); // 未处理的 rejection 会导致扩展崩溃
+  ```
+
+- **定时器生命周期管理**：所有 `setInterval`、`setTimeout` 必须在 `deactivate()` / `dispose()` 中清理
+  ```typescript
+  private intervalId: NodeJS.Timeout | undefined;
+  start() { this.intervalId = setInterval(() => {...}, 1000); }
+  dispose() { if (this.intervalId) { clearInterval(this.intervalId); this.intervalId = undefined; } }
+  ```
+
+- **事件监听器必须移除**：`vscode.Disposable`、DOM `addEventListener` 都要在卸载时清理
+
+- **外部数据校验**：API 响应、文件内容、用户输入必须先校验类型和范围，再使用
+  ```typescript
+  // ✅ 正确
+  if (!data || typeof data.tokens !== 'number' || data.tokens < 0) { return fallback; }
+  // ❌ 错误
+  const tokens = data.tokens; // data 可能是 null 或格式不符
+  ```
+
+- **WebView 消息校验**：Dashboard 与后端通信时，必须校验消息 `command` 字段，拒绝未知指令
+  ```typescript
+  // ✅ 正确
+  if (message.command === 'refresh') { ... }
+  else { log.warn('unknown command', message.command); }
+  // ❌ 错误
+  this[message.command](); // 任意命令执行风险
+  ```
+
+- **禁止阻塞主线程**：大量数据计算（如大文件解析）应使用 chunked 处理或 worker，避免 UI 冻结
+
+- **资源释放**：文件句柄、网络连接、临时变量在使用完毕后及时释放或置为 `undefined`
+
+### 6.3 错误处理原则
+
+1. **优雅降级**：发生异常时，返回安全默认值或进入降级模式，禁止向上抛导致扩展崩溃
+2. **日志记录**：所有 caught 异常必须记录（`console.error` 或日志系统），便于排查
+3. **用户感知**：影响用户体验的错误（如网络失败）应在状态栏或 tooltip 中给出简要提示
+4. **静默失败**：非核心功能（如缓存刷新）失败时，允许静默降级，不打扰用户
+
+---
+
+## 7. 审查检查清单
 
 提交代码前，逐条确认：
 
@@ -170,5 +253,9 @@ Dashboard 的 WebView 无法直接导入后端模块。当前方案：
 - [ ] 新增字段前已做内存估算，双红线均满足
 - [ ] 所有新增/修改的显示字符串已添加到 `src/i18n.ts`（中英双语）
 - [ ] 所有百分比显示统一使用 `formatPercent`（后端）或内联 `formatPercent`（前端）
+- [ ] **所有可能异常的调用（IO、网络、JSON.parse、第三方库）已加 `try-catch`**
+- [ ] **所有异步操作已处理 rejection，没有裸 `api.fetch()`**
+- [ ] **所有 `setInterval` / `setTimeout` 已在 `dispose()` 中清理**
+- [ ] **外部数据（API、文件、用户输入）已有类型/范围校验**
 - [ ] 66+ 测试全部通过
 - [ ] `node esbuild.js --production` 编译成功
