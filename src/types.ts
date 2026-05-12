@@ -235,10 +235,8 @@ export interface DailyModelBreakdown {
   date: string;
   tokensTotal: number;
   costTotal: number;
-  tokensK26?: number;
-  costK26?: number;
-  tokensLite?: number;
-  costLite?: number;
+  /** Per-model breakdown keyed by actual model name from UsageEntry.model */
+  byModel: Record<string, { tokens: number; cost: number }>;
 }
 
 export interface CostCurveOptions {

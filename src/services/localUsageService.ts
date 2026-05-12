@@ -61,6 +61,11 @@ export class LocalUsageService {
     return this.aggregate;
   }
 
+  async getRawEntries(): Promise<UsageEntry[]> {
+    const usage = await this.getLocalUsage();
+    return usage.entries;
+  }
+
   invalidate(): void {
     this.fileStates.clear();
     this.aggregate = null;
