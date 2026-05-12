@@ -333,3 +333,101 @@ export function drawBorderTable(
   out.push(border('-'));
   return out;
 }
+
+// ============================================================================
+// Phase 3: History Aggregation Helpers
+// ============================================================================
+
+export interface TimeBucket {
+  key: string;
+  startMs: number;
+  endMs: number;
+}
+
+/** Build daily buckets for a date range [startMs, endMs]. */
+export function buildDailyBuckets(startMs: number, endMs: number): TimeBucket[] {
+  const buckets: TimeBucket[] = [];
+  const d = new Date(startMs);
+  d.setHours(0, 0, 0, 0);
+  while (d.getTime() <= endMs) {
+    const dayStart = d.getTime();
+    const dayEnd = dayStart + 24 * 3600 * 1000 - 1;
+    buckets.push({
+      key: formatDateLocal(dayStart),
+      startMs: dayStart,
+      endMs: Math.min(dayEnd, endMs),
+    });
+    d.setDate(d.getDate() + 1);
+  }
+  return buckets;
+}
+
+/** Build hourly buckets for a single day (local time). */
+export function buildHourlyBuckets(dayMs: number): TimeBucket[] {
+  const buckets: TimeBucket[] = [];
+  const d = new Date(dayMs);
+  d.setHours(0, 0, 0, 0);
+  for (let h = 0; h < 24; h++) {
+    const hourStart = d.getTime() + h * 3600 * 1000;
+    buckets.push({
+      key: `${String(h).padStart(2, '0')}:00`,
+      startMs: hourStart,
+      endMs: hourStart + 3600 * 1000 - 1,
+    });
+  }
+  return buckets;
+}
+
+/** Format a timestamp as YYYY-MM-DD in local time. */
+export function formatDateLocal(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Format a timestamp as YYYY-MM in local time. */
+export function formatMonthLocal(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+/** Format currency with ¥ prefix and 2 decimals. */
+export function fmtRmb(n: number): string {
+  const safe = isFinite(n) ? n : 0;
+  return '¥' + safe.toFixed(2);
+}
+
+/** Format large numbers with commas. */
+export function fmtNumber(n: number): string {
+  const safe = isFinite(n) ? Math.round(n) : 0;
+  return safe.toLocaleString('en-US');
+}
+
+/** Format a timestamp for cost curve X-axis labels. */
+export function fmtCostCurveTime(ms: number, window: '5h' | '7d'): string {
+  const d = new Date(ms);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  if (window === '5h') {
+    return `${hh}:${mm}:${ss}`;
+  }
+  const mo = d.getMonth() + 1;
+  const day = d.getDate();
+  return `${mo}.${day}-${hh}:${mm}`;
+}
+
+/** Heatmap color interpolation: blue (low) -> red (high). */
+export function heatmapColor(t: number): string {
+  t = Math.max(0, Math.min(1, t));
+  const c0 = [13, 71, 161];
+  const c1 = [191, 54, 12];
+  const r = Math.round(c0[0] + (c1[0] - c0[0]) * t);
+  const g = Math.round(c0[1] + (c1[1] - c0[1]) * t);
+  const b = Math.round(c0[2] + (c1[2] - c0[2]) * t);
+  return `rgb(${r},${g},${b})`;
+}

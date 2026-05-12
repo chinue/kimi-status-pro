@@ -197,3 +197,96 @@ function makeQuota(partial: Partial<QuotaData> = {}): QuotaData {
     ...partial,
   };
 }
+
+
+import {
+  buildDailyBuckets, buildHourlyBuckets, formatDateLocal, formatMonthLocal,
+  fmtRmb, fmtNumber, fmtCostCurveTime, heatmapColor,
+} from '../src/calc';
+
+describe('Phase 3 calc helpers', () => {
+  describe('buildDailyBuckets', () => {
+    it('builds buckets for a single day', () => {
+      const start = new Date('2026-05-10T00:00:00').getTime();
+      const end = start + 3600 * 1000;
+      const buckets = buildDailyBuckets(start, end);
+      expect(buckets.length).to.equal(1);
+      expect(buckets[0].key).to.equal('2026-05-10');
+    });
+
+    it('builds buckets across midnight', () => {
+      const start = new Date('2026-05-10T12:00:00').getTime();
+      const end = new Date('2026-05-12T06:00:00').getTime();
+      const buckets = buildDailyBuckets(start, end);
+      expect(buckets.length).to.equal(3);
+      expect(buckets[0].key).to.equal('2026-05-10');
+      expect(buckets[1].key).to.equal('2026-05-11');
+      expect(buckets[2].key).to.equal('2026-05-12');
+    });
+  });
+
+  describe('buildHourlyBuckets', () => {
+    it('builds 24 hourly buckets', () => {
+      const day = new Date('2026-05-10T00:00:00').getTime();
+      const buckets = buildHourlyBuckets(day);
+      expect(buckets.length).to.equal(24);
+      expect(buckets[0].key).to.equal('00:00');
+      expect(buckets[23].key).to.equal('23:00');
+    });
+  });
+
+  describe('formatDateLocal', () => {
+    it('formats as YYYY-MM-DD', () => {
+      const ms = new Date('2026-05-10T12:00:00').getTime();
+      expect(formatDateLocal(ms)).to.equal('2026-05-10');
+    });
+  });
+
+  describe('formatMonthLocal', () => {
+    it('formats as YYYY-MM', () => {
+      const ms = new Date('2026-05-10T12:00:00').getTime();
+      expect(formatMonthLocal(ms)).to.equal('2026-05');
+    });
+  });
+
+  describe('fmtRmb', () => {
+    it('formats with ¥ and 2 decimals', () => {
+      expect(fmtRmb(12.345)).to.equal('¥12.35');
+      expect(fmtRmb(0)).to.equal('¥0.00');
+    });
+    it('handles non-finite', () => {
+      expect(fmtRmb(NaN)).to.equal('¥0.00');
+    });
+  });
+
+  describe('fmtNumber', () => {
+    it('formats with commas', () => {
+      expect(fmtNumber(1234567)).to.equal('1,234,567');
+      expect(fmtNumber(0)).to.equal('0');
+    });
+  });
+
+  describe('fmtCostCurveTime', () => {
+    it('formats 5h window', () => {
+      const ms = new Date('2026-05-10T14:30:45').getTime();
+      expect(fmtCostCurveTime(ms, '5h')).to.match(/\d{2}:\d{2}:\d{2}/);
+    });
+    it('formats 7d window', () => {
+      const ms = new Date('2026-05-10T14:30:45').getTime();
+      expect(fmtCostCurveTime(ms, '7d')).to.match(/5\.10-\d{2}:\d{2}/);
+    });
+  });
+
+  describe('heatmapColor', () => {
+    it('returns blue at t=0', () => {
+      expect(heatmapColor(0)).to.equal('rgb(13,71,161)');
+    });
+    it('returns red at t=1', () => {
+      expect(heatmapColor(1)).to.equal('rgb(191,54,12)');
+    });
+    it('clamps out of range', () => {
+      expect(heatmapColor(-1)).to.equal('rgb(13,71,161)');
+      expect(heatmapColor(2)).to.equal('rgb(191,54,12)');
+    });
+  });
+});

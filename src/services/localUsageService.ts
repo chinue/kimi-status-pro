@@ -5,22 +5,11 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import { TokenPricing } from '../types';
+import { TokenPricing, UsageEntry } from '../types';
 import { calculateCost, TokenUsage } from '../calc';
 import { log } from '../utils';
 
 const SESSIONS_DIR = path.join(os.homedir(), '.kimi', 'sessions');
-
-export interface UsageEntry {
-  timestamp: number; // ms
-  inputOther: number;
-  output: number;
-  inputCacheRead: number;
-  inputCacheCreation: number;
-  cost: number;
-  messageId: string | null;
-  model?: string;
-}
 
 export interface LocalAggregatedUsage {
   tokensToday: number;

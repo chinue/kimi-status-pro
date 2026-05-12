@@ -11,7 +11,7 @@ export const defaultState = (): AppState => ({
   dataSource: 'no-data',
   isLoading: false,
   localEstimate: null,
-  // Phase 3: localUsage costs will be stored in localEstimate via dispatch
+  usageEntries: [],
   ui: {
     displayMode: 'percent',
     language: 'auto',
@@ -60,18 +60,21 @@ function reducer(state: AppState, action: Action): AppState {
     case 'LOCAL_ESTIMATE': {
       const payload = action.payload;
       const current = state.localEstimate;
+      const entries = payload.entries ?? state.usageEntries;
 
       // 如果 localEstimate 已存在，且 payload 中每个字段的值都与当前值严格相等，
-      // 则返回原 state 引用，Store 会跳过所有 listener（避免不必要的 UI 刷新）
+      // 且 entries 没有变化，则返回原 state 引用，Store 会跳过所有 listener（避免不必要的 UI 刷新）
       if (
         current &&
-        Object.keys(payload).every((k) => (payload as any)[k] === (current as any)[k])
+        Object.keys(payload).every((k) => k === 'entries' || (payload as any)[k] === (current as any)[k]) &&
+        entries === state.usageEntries
       ) {
         return state;
       }
 
       const next: AppState = {
         ...state,
+        usageEntries: entries,
         localEstimate: current
           ? { ...current, ...payload }
           : {
