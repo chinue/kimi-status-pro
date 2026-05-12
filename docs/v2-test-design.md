@@ -670,9 +670,10 @@ describe('StatusBarPresenter', () => {
     // 由于 presenter 内部使用 vscode API，mock 后可通过 presenter['itemWeekly'].text 读取
   });
 
-  it('hides window item when paused', () => {
+  it('hides data items when paused', () => {
     store.dispatch({ type: 'UI_SET_PAUSED', payload: true });
-    // 验证 itemWindow.hide() 被调用
+    // 验证 itemWeekly.hide() 和 itemWindow.hide() 均被调用
+    // 暂停时只保留暂停按钮，不显示数据
   });
 
   it('shows ⛓️‍💥 on network error', () => {

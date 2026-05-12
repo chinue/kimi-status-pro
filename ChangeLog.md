@@ -1,5 +1,35 @@
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-12
+
+### Added
+- **Exception safety & crash prevention rules** (`docs/CODING_STANDARDS.md`)
+  - Section 6: mandatory `try-catch` for IO, network, JSON.parse, third-party calls
+  - Defensive programming checklist: null-checks, bounds-checks, async rejection handling, timer cleanup, external data validation, webview message validation
+  - Error handling principles: graceful degradation, logging, user awareness, silent failure for non-critical paths
+- **Design document index** (`docs/INDEX.md`)
+  - File-to-doc mapping for all `src/` modules
+  - `// DESIGN:` comment markers added to 13 source files for quick lookup
+- **`_pauseSignal` configuration registration** (`package.json`)
+  - Registers `kimiStatusPro._pauseSignal` to prevent "not registered" error on pause toggle
+
+### Fixed
+- **Pause button `_pauseSignal` error** (`package.json`, `src/extension.ts`)
+  - Fixed VS Code error when clicking pause: configuration key was not registered in `contributes.configuration`
+  - `onDidChangeConfiguration` now properly syncs pause state across windows via `_pauseSignal` broadcast
+- **Status bar not hiding on pause** (`src/presenters/statusBar.ts`)
+  - `render()` now hides `itemWeekly` and `itemWindow` when `isPaused` is true, showing only the pause button
+  - Prevents displaying 0% when scheduler is paused and no data is available
+
+### Changed
+- **All skills translated to Chinese** (`.kimi/skills/*/SKILL.md` ×10)
+  - `vscode-extension-release-workflow`: added design-doc sync check (step 2) and version-bump rules (step 5)
+  - `version-bump-rules`: clarified MAJOR/MINOR/PATCH decision matrix
+- **Design docs synced for pause feature** (`docs/v2-phase1-implementation.md`, `docs/v2-phase2-implementation.md`, `docs/v2-rebuild-design.md`, `docs/v2-test-design.md`)
+  - Added `_pauseSignal` config to package.json examples
+  - Added pause-state handling in `extension.ts` configuration listener
+  - Added `isPaused` UI hiding logic in `statusBar.ts` render examples
+
 ## [0.1.6] - 2026-05-12
 
 ### Added

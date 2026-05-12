@@ -1,3 +1,4 @@
+// DESIGN: v2-phase2-implementation.md#servicesschedulerts
 // 💠 Generic: scheduler logic is provider-agnostic.
 
 import { Store } from '../store';

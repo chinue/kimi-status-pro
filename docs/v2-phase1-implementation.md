@@ -99,6 +99,10 @@ v2/
         "kimiStatusPro.shortRefreshIntervalSeconds": {
           "type": "number", "default": 5, "minimum": 1, "maximum": 60,
           "description": "Local estimate short refresh interval in seconds"
+        },
+        "kimiStatusPro._pauseSignal": {
+          "type": "number", "default": 0,
+          "description": "Internal: pause state broadcast signal (timestamp). Do not modify manually."
         }
       }
     }

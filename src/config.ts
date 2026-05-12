@@ -1,3 +1,4 @@
+// DESIGN: v2-phase2-implementation.md#configts
 import * as vscode from 'vscode';
 import { DisplayMode, LanguageSetting } from './types';
 

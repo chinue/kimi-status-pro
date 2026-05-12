@@ -1,3 +1,4 @@
+// DESIGN: v2-phase2-implementation.md#servicescacheservicets
 // 💠 Generic: cache schema is provider-agnostic.
 
 import * as fs from 'fs/promises';

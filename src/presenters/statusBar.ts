@@ -1,3 +1,4 @@
+// DESIGN: v2-phase2-implementation.md#presentersstatusbarts
 import * as vscode from 'vscode';
 import { Store } from '../store';
 import { ConfigService } from '../config';
@@ -60,6 +61,13 @@ export class StatusBarPresenter {
       // Pause item always visible
       this.itemPause.text = '\u23F8\uFE0F';
       this.itemPause.tooltip = state.ui.isPaused ? t('tooltip.resumeAutoRefresh') : t('tooltip.pauseAutoRefresh');
+
+      // When paused, hide data items and show only pause button
+      if (state.ui.isPaused) {
+        this.itemWeekly.hide();
+        this.itemWindow.hide();
+        return;
+      }
 
       if (state.authStatus === 'missing') {
         this.itemWeekly.text = '$(key) Kimi: sign in';

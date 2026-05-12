@@ -1,6 +1,7 @@
 // 🔀 Provider boundary: API format is Kimi-specific.
 // If adapting to another provider, replace this module.
 
+// DESIGN: v2-provider-abstraction.md
 import fetch from 'node-fetch';
 import { QuotaData, ApiResponse } from '../types';
 

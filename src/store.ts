@@ -1,3 +1,4 @@
+// DESIGN: v2-phase2-implementation.md#storets
 import { AppState, Action, AuthStatus } from './types';
 
 export const defaultState = (): AppState => ({

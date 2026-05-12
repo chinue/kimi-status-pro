@@ -1,3 +1,4 @@
+// DESIGN: v2-phase2-implementation.md#extensionts
 import * as vscode from 'vscode';
 import { Store } from './store';
 import { ConfigService } from './config';
@@ -94,6 +95,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (e.affectsConfiguration('kimiStatusPro')) {
         store.dispatch({ type: 'UI_SET_DISPLAY_MODE', payload: config.displayMode });
         store.dispatch({ type: 'UI_SET_LANGUAGE', payload: config.language });
+        // Sync pause state from other windows via _pauseSignal broadcast
+        if (e.affectsConfiguration('kimiStatusPro._pauseSignal')) {
+          const pausedFromGlobal = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+          const currentPaused = store.getState().ui.isPaused;
+          if (pausedFromGlobal !== currentPaused) {
+            store.dispatch({ type: 'UI_SET_PAUSED', payload: pausedFromGlobal });
+          }
+        }
       }
     })
   );

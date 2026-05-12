@@ -1017,6 +1017,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (e.affectsConfiguration('kimiStatusPro')) {
         store.dispatch({ type: 'UI_SET_DISPLAY_MODE', payload: config.displayMode });
         store.dispatch({ type: 'UI_SET_LANGUAGE', payload: config.language });
+        // Sync pause state from other windows via _pauseSignal broadcast
+        if (e.affectsConfiguration('kimiStatusPro._pauseSignal')) {
+          const pausedFromGlobal = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+          const currentPaused = store.getState().ui.isPaused;
+          if (pausedFromGlobal !== currentPaused) {
+            store.dispatch({ type: 'UI_SET_PAUSED', payload: pausedFromGlobal });
+          }
+        }
       }
     })
   );
@@ -1108,6 +1116,13 @@ export class StatusBarPresenter {
       // Pause item always visible
       this.itemPause.text = '\u23F8\uFE0F';
       this.itemPause.tooltip = state.ui.isPaused ? 'Resume auto-refresh' : 'Pause auto-refresh';
+
+      // When paused, hide data items and show only pause button
+      if (state.ui.isPaused) {
+        this.itemWeekly.hide();
+        this.itemWindow.hide();
+        return;
+      }
 
       if (state.authStatus === 'missing') {
         this.itemWeekly.text = '$(key) Kimi: sign in';
@@ -1936,6 +1951,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (e.affectsConfiguration('kimiStatusPro')) {
         store.dispatch({ type: 'UI_SET_DISPLAY_MODE', payload: config.displayMode });
         store.dispatch({ type: 'UI_SET_LANGUAGE', payload: config.language });
+        // Sync pause state from other windows via _pauseSignal broadcast
+        if (e.affectsConfiguration('kimiStatusPro._pauseSignal')) {
+          const pausedFromGlobal = context.globalState.get<boolean>(PAUSE_STATE_KEY, false);
+          const currentPaused = store.getState().ui.isPaused;
+          if (pausedFromGlobal !== currentPaused) {
+            store.dispatch({ type: 'UI_SET_PAUSED', payload: pausedFromGlobal });
+          }
+        }
       }
     })
   );
@@ -2025,6 +2048,13 @@ export class StatusBarPresenter {
       // Pause item always visible
       this.itemPause.text = '\u23F8\uFE0F';
       this.itemPause.tooltip = state.ui.isPaused ? 'Resume auto-refresh' : 'Pause auto-refresh';
+
+      // When paused, hide data items and show only pause button
+      if (state.ui.isPaused) {
+        this.itemWeekly.hide();
+        this.itemWindow.hide();
+        return;
+      }
 
       if (state.authStatus === 'missing') {
         this.itemWeekly.text = '$(key) Kimi: sign in';

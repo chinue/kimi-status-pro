@@ -346,6 +346,17 @@ class StatusBarPresenter {
   }
 
   private render(state: AppState): void {
+    // Pause button always visible
+    this.items.pause.text = '⏸️';
+    this.items.pause.tooltip = state.ui.isPaused ? 'Resume auto-refresh' : 'Pause auto-refresh';
+
+    // When paused, hide data items and show only pause button
+    if (state.ui.isPaused) {
+      this.items.weekly.hide();
+      this.items.window.hide();
+      return;
+    }
+
     if (state.authStatus === 'missing') {
       this.items.weekly.text = '$(key) Kimi: sign in';
       this.items.weekly.command = 'kimiStatusPro.signIn';
@@ -370,7 +381,6 @@ class StatusBarPresenter {
     const metrics = computeUtilization(state.quota);
     this.items.weekly.text = `🌘 Kimi:${formatPercent(metrics.weeklyPct, 1)}`;
     this.items.window.text = `5️⃣ ${metrics.windowMiniBar} ${formatPercent(metrics.windowPct, 1)}`;
-    this.items.pause.text = '⏸️';
     this.items.weekly.show();
     this.items.window.show();
   }

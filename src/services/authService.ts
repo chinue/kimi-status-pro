@@ -1,6 +1,7 @@
 // 🔀 Provider boundary: token resolution is Kimi-specific.
 
 import * as crypto from 'crypto';
+// DESIGN: v2-phase2-implementation.md#servicesauthservicets
 import * as vscode from 'vscode';
 import fetch from 'node-fetch';
 import { KimiOAuthCredentials } from '../types';

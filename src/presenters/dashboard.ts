@@ -1,3 +1,4 @@
+// DESIGN: v2-dashboard-design.md
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { Store } from '../store';

@@ -1,3 +1,4 @@
+// DESIGN: v2-phase2-implementation.md#typests
 export interface QuotaData {
   weeklyLimit: number;
   weeklyUsed: number;

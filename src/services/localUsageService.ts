@@ -1,3 +1,4 @@
+// DESIGN: v2-local-estimation-design.md
 // 🔀 Provider boundary: JSONL path and format are Kimi-specific.
 
 import * as fs from 'fs/promises';

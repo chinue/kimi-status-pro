@@ -2,7 +2,7 @@
   "name": "kimi-status-pro",
   "displayName": "KimiStatusPro",
   "description": "Monitor Kimi Code quota usage in real-time",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "kayuii",
   "license": "MIT",
   "repository": {
@@ -94,6 +94,11 @@
           "minimum": 30,
           "maximum": 3650,
           "description": "Local usage data retention period in days. Range: 30–3650. Older entries are discarded during scan."
+        },
+        "kimiStatusPro._pauseSignal": {
+          "type": "number",
+          "default": 0,
+          "description": "Internal: pause state broadcast signal (timestamp). Do not modify manually."
         }
       }
     }

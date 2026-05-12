@@ -105,6 +105,7 @@ export function fmtCost(rmb: number): string {
   return '¥' + safe.toFixed(2);
 }
 
+// DESIGN: v2-local-estimation-design.md
 // ---------------------------------------------------------------------------
 // Phase 2: Calibration & Estimation
 // ---------------------------------------------------------------------------
