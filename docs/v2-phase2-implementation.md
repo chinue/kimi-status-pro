@@ -638,6 +638,7 @@ export const DEFAULT_PRICING: TokenPricing = {
 重构为 short/long 双 tick，完整代码：
 
 ```typescript
+// DESIGN: v2-phase2-implementation.md#servicesschedulerts
 // 💠 Generic: scheduler logic is provider-agnostic.
 
 import { Store } from '../store';
@@ -657,14 +658,15 @@ import {
   isCalibrationValid,
 } from '../calc';
 
-const SHORT_MS = 5_000;
-const LONG_MS = 60_000;
-
 export class Scheduler {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private lastLongTick = 0;
   private readonly config = ConfigService.getInstance();
+
+  private get longMs(): number {
+    return this.config.refreshIntervalSeconds * 1000;
+  }
 
   constructor(
     private store: Store,
@@ -678,9 +680,9 @@ export class Scheduler {
     if (this.running) return;
     this.running = true;
     // Ensure first tick is a long tick so we fetch API data immediately
-    this.lastLongTick = Date.now() - LONG_MS;
-    // First tick after 100ms (let UI render first)
-    this.schedule(Date.now() + 100);
+    this.lastLongTick = Date.now() - this.longMs;
+    // First tick immediately (fetch API data as soon as possible)
+    this.schedule(Date.now());
   }
 
   stop(): void {
@@ -688,10 +690,12 @@ export class Scheduler {
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
   }
 
-  /** Manual refresh: cancel current wait and execute immediately. */
+  /** Manual refresh: force a long tick (API fetch) immediately. */
   force(): void {
     if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
+    // Reset lastLongTick so the next tick is guaranteed to be a long tick
+    this.lastLongTick = Date.now() - this.longMs;
     this.schedule(Date.now() + 50);
   }
 
@@ -704,7 +708,7 @@ export class Scheduler {
   private async tick(): Promise<void> {
     if (!this.running) return;
     const now = Date.now();
-    const isLong = now - this.lastLongTick >= LONG_MS;
+    const isLong = now - this.lastLongTick >= this.longMs;
 
     try {
       if (isLong) {
@@ -718,8 +722,8 @@ export class Scheduler {
     }
 
     // Schedule next tick: whichever comes first (short or long)
-    const nextLong = this.lastLongTick + LONG_MS;
-    const nextShort = now + SHORT_MS;
+    const nextLong = this.lastLongTick + this.longMs;
+    const nextShort = now + this.config.shortRefreshIntervalSeconds * 1000;
     this.schedule(Math.min(nextLong, nextShort));
   }
 
@@ -734,7 +738,14 @@ export class Scheduler {
     const localUsage = await this.localUsageService.getLocalUsage({
       weeklyResetAtMs: quota?.weeklyResetAt,
       windowResetAtMs: quota?.windowResetAt,
+      dataRetentionDays: this.config.dataRetentionDays,
     });
+
+    // Skip short tick when no local data is available to avoid overwriting
+    // API percentages with zeros.
+    if (localUsage.entries.length === 0) {
+      return;
+    }
 
     const calibration = state.localEstimate
       ? {
@@ -762,7 +773,29 @@ export class Scheduler {
 
     this.store.dispatch({
       type: 'LOCAL_ESTIMATE',
-      payload: { weeklyPct, windowPct },
+      payload: {
+        weeklyPct,
+        windowPct,
+        cost5h: localUsage.cost5h,
+        cost7d: localUsage.cost7d,
+        costToday: localUsage.costToday,
+        // Full detail for tooltip / dashboard (from memory, no disk access)
+        requestsToday: localUsage.requestsToday,
+        tokensToday: localUsage.tokensToday,
+        tokensIn5h: localUsage.tokensIn5h,
+        tokensOut5h: localUsage.tokensOut5h,
+        tokensCacheRead5h: localUsage.tokensCacheRead5h,
+        tokensCacheCreate5h: localUsage.tokensCacheCreate5h,
+        requests5h: localUsage.requests5h,
+        tokensIn7d: localUsage.tokensIn7d,
+        tokensOut7d: localUsage.tokensOut7d,
+        tokensCacheRead7d: localUsage.tokensCacheRead7d,
+        tokensCacheCreate7d: localUsage.tokensCacheCreate7d,
+        requests7d: localUsage.requests7d,
+        tokensThisCycle: localUsage.tokensThisCycle,
+        costThisCycle: localUsage.costThisCycle,
+        requestsThisCycle: localUsage.requestsThisCycle,
+      },
     });
   }
 
@@ -785,15 +818,29 @@ export class Scheduler {
     if (result.ok && result.data) {
       const apiData = result.data;
 
-      // Read local data for calibration
       const localUsage = await this.localUsageService.getLocalUsage({
         weeklyResetAtMs: apiData.weeklyResetAt,
         windowResetAtMs: apiData.windowResetAt,
+        dataRetentionDays: this.config.dataRetentionDays,
       });
 
-      // Calibrate
-      const tokenCapacity = calibrateTokenCapacity(apiData.weeklyUsedPct, localUsage.tokensThisCycle);
-      const windowCostCapacity = calibrateWindowCostCapacity(apiData.windowUsedPct, localUsage.cost5h);
+      // 百分数平稳化：若本地估算值四舍五入后的整数与 API 返回的整数一致，
+      // 则保留更精细的本地估算值，避免每次 API 刷新都跳回整数造成视觉跳动
+      const currentEstimate = this.store.getState().localEstimate;
+      let weeklyPct = apiData.weeklyUsedPct;
+      let windowPct = apiData.windowUsedPct;
+      if (currentEstimate) {
+        if (Math.round(currentEstimate.weeklyPct) === apiData.weeklyUsedPct) {
+          weeklyPct = currentEstimate.weeklyPct;
+        }
+        if (Math.round(currentEstimate.windowPct) === apiData.windowUsedPct) {
+          windowPct = currentEstimate.windowPct;
+        }
+      }
+
+      // Calibrate using the smoothed percentages so short ticks preserve the fine-grained value
+      const tokenCapacity = calibrateTokenCapacity(weeklyPct, localUsage.tokensThisCycle);
+      const windowCostCapacity = calibrateWindowCostCapacity(windowPct, localUsage.cost5h);
 
       // Write cache with calibration
       await this.cacheService.write({
@@ -812,11 +859,30 @@ export class Scheduler {
       this.store.dispatch({
         type: 'LOCAL_ESTIMATE',
         payload: {
-          weeklyPct: apiData.weeklyUsedPct,
-          windowPct: apiData.windowUsedPct,
+          weeklyPct,
+          windowPct,
           tokenCapacity,
           windowCostCapacity,
           calibratedAt: Date.now(),
+          cost5h: localUsage.cost5h,
+          cost7d: localUsage.cost7d,
+          costToday: localUsage.costToday,
+          // Full detail for tooltip / dashboard (from memory, no disk access)
+          requestsToday: localUsage.requestsToday,
+          tokensToday: localUsage.tokensToday,
+          tokensIn5h: localUsage.tokensIn5h,
+          tokensOut5h: localUsage.tokensOut5h,
+          tokensCacheRead5h: localUsage.tokensCacheRead5h,
+          tokensCacheCreate5h: localUsage.tokensCacheCreate5h,
+          requests5h: localUsage.requests5h,
+          tokensIn7d: localUsage.tokensIn7d,
+          tokensOut7d: localUsage.tokensOut7d,
+          tokensCacheRead7d: localUsage.tokensCacheRead7d,
+          tokensCacheCreate7d: localUsage.tokensCacheCreate7d,
+          requests7d: localUsage.requests7d,
+          tokensThisCycle: localUsage.tokensThisCycle,
+          costThisCycle: localUsage.costThisCycle,
+          requestsThisCycle: localUsage.requestsThisCycle,
         },
       });
     } else {
@@ -846,7 +912,8 @@ export class Scheduler {
     this.store.dispatch({ type: 'LOADING_END' });
   }
 }
-```
+
+`````
 
 ---
 

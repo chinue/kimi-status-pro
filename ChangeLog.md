@@ -1,5 +1,36 @@
 ## [Unreleased]
 
+## [0.1.9] - 2026-05-12
+
+### Fixed
+- **Percentage reset to integer on manual refresh when old quota had decimal precision** (`src/services/scheduler.ts`)
+  - Root cause: `doLongTick()` only smoothed against `currentEstimate`, but when `localEstimate` was missing or had integer value, it fell back to raw API integer, losing old `quota` decimal precision (e.g. 12.1% → 12%)
+  - Fix: also check old `quota` precision during smoothing; if old quota rounds to the same API integer, preserve its finer decimal value
+- **Test data type errors** (`test/scheduler.test.ts`)
+  - Added missing `cost` and `messageId` fields to `UsageEntry` stubs
+
+### Added
+- **Regression test for quota precision preservation** (`test/scheduler.test.ts`)
+  - `preserves old quota decimal precision when API returns integer and no current estimate`
+
+## [0.1.8] - 2026-05-12
+
+### Fixed
+- **Percentage smoothing lost after short tick following API refresh** (`src/services/scheduler.ts`)
+  - Root cause: `doLongTick()` calibrated `tokenCapacity` using raw API integer before smoothing, so subsequent `doShortTick()` recomputed back to the API integer
+  - Fix: perform smoothing first, then calibrate capacity using the smoothed percentage
+- **Long refresh interval setting ignored** (`src/services/scheduler.ts`)
+  - Root cause: `LONG_MS = 60_000` was hardcoded and never read `ConfigService.refreshIntervalSeconds`
+  - Fix: replaced with dynamic `longMs` getter that reads user setting every tick
+- **Short tick zeroes percentage when no local cache files exist** (`src/services/scheduler.ts`)
+  - Root cause: `doShortTick()` unconditionally dispatched `LOCAL_ESTIMATE` with all-zero aggregated values when `~/.kimi/sessions` was missing, overwriting good API/smoothed percentages
+  - Fix: skip short tick entirely when `localUsage.entries.length === 0`
+
+### Added
+- **Regression tests for scheduler fixes** (`test/scheduler.test.ts`)
+  - `smooth estimate preserved through short tick after long tick`: verifies fine-grained percentage survives short tick after API refresh
+  - `respects custom refreshIntervalSeconds for long tick`: verifies custom interval (e.g. 120s) is honored
+
 ## [0.1.7] - 2026-05-12
 
 ### Added

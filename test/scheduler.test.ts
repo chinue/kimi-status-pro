@@ -6,6 +6,7 @@ import { AuthService } from '../src/services/authService';
 import { ApiService } from '../src/services/apiService';
 import { CacheService } from '../src/services/cacheService';
 import { LocalUsageService } from '../src/services/localUsageService';
+import { ConfigService } from '../src/config';
 import { makeContext } from './mocks/vscode';
 
 describe('Scheduler', () => {
@@ -111,7 +112,7 @@ describe('Scheduler', () => {
       cost7d: 10, requests7d: 5,
       cost5h: 5,
       tokensThisCycle: 25_000_000, costThisCycle: 10, requestsThisCycle: 5,
-      entries: [],
+      entries: [{ timestamp: Date.now(), inputOther: 100, output: 50, inputCacheRead: 10, inputCacheCreation: 5, cost: 0.01, messageId: null }],
     });
     // After 5s: 26M tokens (1M increase)
     getUsageStub.onSecondCall().resolves({
@@ -122,7 +123,7 @@ describe('Scheduler', () => {
       cost7d: 10.4, requests7d: 6,
       cost5h: 5.2,
       tokensThisCycle: 26_000_000, costThisCycle: 10.4, requestsThisCycle: 6,
-      entries: [],
+      entries: [{ timestamp: Date.now(), inputOther: 100, output: 50, inputCacheRead: 10, inputCacheCreation: 5, cost: 0.01, messageId: null }],
     });
 
     scheduler.start();
@@ -185,7 +186,7 @@ describe('Scheduler', () => {
     expect(store.getState().dataSource).to.equal('api');
     expect(fetchStub.callCount).to.equal(1);
 
-    // Advance 5s — normally this would be a short tick
+    // Advance 5s �?normally this would be a short tick
     await clock.tickAsync(5000);
     await Promise.resolve();
 
@@ -197,7 +198,7 @@ describe('Scheduler', () => {
     await clock.tickAsync(100);
     await Promise.resolve();
 
-    // force() must trigger another long tick → API fetch
+    // force() must trigger another long tick �?API fetch
     expect(fetchStub.callCount).to.equal(2);
 
     fetchStub.restore();
@@ -226,7 +227,7 @@ describe('Scheduler', () => {
       cost7d: 25, requests7d: 10,
       cost5h: 3,
       tokensThisCycle: 25_000_000, costThisCycle: 50, requestsThisCycle: 20,
-      entries: [],
+      entries: [{ timestamp: Date.now(), inputOther: 100, output: 50, inputCacheRead: 10, inputCacheCreation: 5, cost: 0.01, messageId: null }],
     });
     getUsageStub.onSecondCall().resolves({
       tokensToday: 1_100_000, costToday: 5.5, requestsToday: 4,
@@ -236,7 +237,7 @@ describe('Scheduler', () => {
       cost7d: 26, requests7d: 11,
       cost5h: 3.5,
       tokensThisCycle: 26_000_000, costThisCycle: 52, requestsThisCycle: 21,
-      entries: [],
+      entries: [{ timestamp: Date.now(), inputOther: 100, output: 50, inputCacheRead: 10, inputCacheCreation: 5, cost: 0.01, messageId: null }],
     });
 
     scheduler.start();
@@ -404,4 +405,271 @@ describe('Scheduler', () => {
 
     fetchStub.restore();
   });
+
+  it('preserves old quota decimal precision when API returns integer and no current estimate', async () => {
+    const ctx = makeContext();
+    auth.init(ctx.secrets);
+    await ctx.secrets.store('kimiStatusPro.apiKey', 'sk-test');
+
+    // Seed old quota with 12.1% precision (e.g. from a previous API response)
+    store.dispatch({
+      type: 'API_SUCCESS',
+      payload: {
+        weeklyLimit: 100_000_000, weeklyUsed: 12_100_000, weeklyUsedPct: 12.1, weeklyResetAt: Date.now() + 86400000,
+        windowLimit: 200, windowUsed: 50, windowRemaining: 150, windowUsedPct: 10.4, windowResetAt: Date.now() + 18000000,
+        parallelLimit: 30,
+      },
+    });
+    // No localEstimate yet
+    expect(store.getState().localEstimate).to.be.null;
+
+    // Next API call returns integer 12 (rounded down from 12.1)
+    const quota = {
+      weeklyLimit: 100_000_000, weeklyUsed: 12_000_000, weeklyUsedPct: 12, weeklyResetAt: Date.now() + 86400000,
+      windowLimit: 200, windowUsed: 50, windowRemaining: 150, windowUsedPct: 10, windowResetAt: Date.now() + 18000000,
+      parallelLimit: 30,
+    };
+    const fetchStub = sinon.stub(api, 'fetchQuota').resolves({ ok: true, data: quota });
+    sinon.stub(cache, 'write').resolves();
+
+    const localUsage = LocalUsageService.getInstance();
+    sinon.stub(localUsage, 'getLocalUsage').resolves({
+      tokensToday: 1_000_000, costToday: 5, requestsToday: 3,
+      tokensIn5h: 2_000_000, tokensOut5h: 500_000, tokensCacheRead5h: 100, tokensCacheCreate5h: 50,
+      requests5h: 4,
+      tokensIn7d: 10_000_000, tokensOut7d: 2_000_000, tokensCacheRead7d: 500, tokensCacheCreate7d: 200,
+      cost7d: 25, requests7d: 10,
+      cost5h: 3,
+      tokensThisCycle: 25_000_000, costThisCycle: 50, requestsThisCycle: 20,
+      entries: [],
+    });
+
+    scheduler.start();
+    // First tick is long tick (force)
+    await clock.tickAsync(100);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const le = store.getState().localEstimate;
+    expect(le).to.not.be.null;
+    // Old quota had 12.1, API returns 12 -> preserve old precision
+    expect(le!.weeklyPct).to.equal(12.1);
+    // Old quota had 10.4, API returns 10 -> preserve old precision
+    expect(le!.windowPct).to.equal(10.4);
+
+    fetchStub.restore();
+  });
+
+  it('smooth estimate preserved through short tick after long tick', async () => {
+    const ctx = makeContext();
+    auth.init(ctx.secrets);
+    await ctx.secrets.store('kimiStatusPro.apiKey', 'sk-test');
+
+    // API returns integer 25
+    const quota = {
+      weeklyLimit: 100_000_000, weeklyUsed: 25_000_000, weeklyUsedPct: 25, weeklyResetAt: Date.now() + 86400000,
+      windowLimit: 200, windowUsed: 50, windowRemaining: 150, windowUsedPct: 10, windowResetAt: Date.now() + 18000000,
+      parallelLimit: 30,
+    };
+    const fetchStub = sinon.stub(api, 'fetchQuota').resolves({ ok: true, data: quota });
+    sinon.stub(cache, 'write').resolves();
+
+    const localUsage = LocalUsageService.getInstance();
+    const getUsageStub = sinon.stub(localUsage, 'getLocalUsage');
+    // First long tick: 25M tokens
+    getUsageStub.onCall(0).resolves({
+      tokensToday: 1_000_000, costToday: 5, requestsToday: 3,
+      tokensIn5h: 25_000_000, tokensOut5h: 5_000_000, tokensCacheRead5h: 1_000, tokensCacheCreate5h: 500,
+      requests5h: 5,
+      tokensIn7d: 25_000_000, tokensOut7d: 5_000_000, tokensCacheRead7d: 1_000, tokensCacheCreate7d: 500,
+      cost7d: 10, requests7d: 5,
+      cost5h: 5,
+      tokensThisCycle: 25_000_000, costThisCycle: 10, requestsThisCycle: 5,
+      entries: [{ timestamp: Date.now(), inputOther: 100, output: 50, inputCacheRead: 10, inputCacheCreation: 5, cost: 0.01, messageId: null }],
+    });
+    // Short tick: 25.3M tokens -> creates smooth estimate 25.3%
+    getUsageStub.onCall(1).resolves({
+      tokensToday: 1_000_000, costToday: 5, requestsToday: 3,
+      tokensIn5h: 25_300_000, tokensOut5h: 5_000_000, tokensCacheRead5h: 1_000, tokensCacheCreate5h: 500,
+      requests5h: 5,
+      tokensIn7d: 25_300_000, tokensOut7d: 5_000_000, tokensCacheRead7d: 1_000, tokensCacheCreate7d: 500,
+      cost7d: 10, requests7d: 5,
+      cost5h: 5,
+      tokensThisCycle: 25_300_000, costThisCycle: 10, requestsThisCycle: 5,
+      entries: [{ timestamp: Date.now(), inputOther: 100, output: 50, inputCacheRead: 10, inputCacheCreation: 5, cost: 0.01, messageId: null }],
+    });
+    // Second long tick: API still 25%, local usage 25.3M
+    getUsageStub.onCall(2).resolves({
+      tokensToday: 1_000_000, costToday: 5, requestsToday: 3,
+      tokensIn5h: 25_300_000, tokensOut5h: 5_000_000, tokensCacheRead5h: 1_000, tokensCacheCreate5h: 500,
+      requests5h: 5,
+      tokensIn7d: 25_300_000, tokensOut7d: 5_000_000, tokensCacheRead7d: 1_000, tokensCacheCreate7d: 500,
+      cost7d: 10, requests7d: 5,
+      cost5h: 5,
+      tokensThisCycle: 25_300_000, costThisCycle: 10, requestsThisCycle: 5,
+      entries: [{ timestamp: Date.now(), inputOther: 100, output: 50, inputCacheRead: 10, inputCacheCreation: 5, cost: 0.01, messageId: null }],
+    });
+    // Short tick after second long tick: same usage
+    getUsageStub.onCall(3).resolves({
+      tokensToday: 1_000_000, costToday: 5, requestsToday: 3,
+      tokensIn5h: 25_300_000, tokensOut5h: 5_000_000, tokensCacheRead5h: 1_000, tokensCacheCreate5h: 500,
+      requests5h: 5,
+      tokensIn7d: 25_300_000, tokensOut7d: 5_000_000, tokensCacheRead7d: 1_000, tokensCacheCreate7d: 500,
+      cost7d: 10, requests7d: 5,
+      cost5h: 5,
+      tokensThisCycle: 25_300_000, costThisCycle: 10, requestsThisCycle: 5,
+      entries: [{ timestamp: Date.now(), inputOther: 100, output: 50, inputCacheRead: 10, inputCacheCreation: 5, cost: 0.01, messageId: null }],
+    });
+
+    scheduler.start();
+    // First long tick
+    await clock.tickAsync(100);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.getState().localEstimate!.weeklyPct).to.equal(25);
+
+    // Short tick -> smooth estimate 25.3%
+    await clock.tickAsync(5000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const afterShort = store.getState().localEstimate;
+    expect(afterShort!.weeklyPct).to.be.greaterThan(25);
+    expect(afterShort!.weeklyPct).to.be.lessThan(26);
+
+    // Second long tick -> should preserve smooth estimate
+    await clock.tickAsync(60000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const afterLong = store.getState().localEstimate;
+    // Math.round(25.3) === 25 (API value) -> preserve smooth estimate
+    expect(afterLong!.weeklyPct).to.be.greaterThan(25);
+    expect(afterLong!.weeklyPct).to.be.lessThan(26);
+
+    // Short tick after long tick -> should NOT overwrite back to 25
+    await clock.tickAsync(5000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const afterSecondShort = store.getState().localEstimate;
+    expect(afterSecondShort!.weeklyPct).to.be.greaterThan(25);
+    expect(afterSecondShort!.weeklyPct).to.be.lessThan(26);
+    // Should be very close to the previous smooth estimate
+    expect(afterSecondShort!.weeklyPct).to.be.closeTo(afterLong!.weeklyPct, 0.01);
+
+    fetchStub.restore();
+  });
+
+  it('respects custom refreshIntervalSeconds for long tick', async () => {
+    sinon.stub(ConfigService.prototype, 'refreshIntervalSeconds').value(120);
+
+    const ctx = makeContext();
+    auth.init(ctx.secrets);
+    await ctx.secrets.store('kimiStatusPro.apiKey', 'sk-test');
+
+    const quota = {
+      weeklyLimit: 1000, weeklyUsed: 250, weeklyUsedPct: 25, weeklyResetAt: Date.now() + 86400000,
+      windowLimit: 200, windowUsed: 50, windowRemaining: 150, windowUsedPct: 25, windowResetAt: Date.now() + 18000000,
+      parallelLimit: 30,
+    };
+    const fetchStub = sinon.stub(api, 'fetchQuota').resolves({ ok: true, data: quota });
+    sinon.stub(cache, 'write').resolves();
+    sinon.stub(LocalUsageService.getInstance(), 'getLocalUsage').resolves({
+      tokensToday: 0, costToday: 0, requestsToday: 0,
+      tokensIn5h: 0, tokensOut5h: 0, tokensCacheRead5h: 0, tokensCacheCreate5h: 0,
+      requests5h: 0,
+      tokensIn7d: 0, tokensOut7d: 0, tokensCacheRead7d: 0, tokensCacheCreate7d: 0,
+      cost7d: 0, requests7d: 0,
+      cost5h: 0,
+      tokensThisCycle: 0, costThisCycle: 0, requestsThisCycle: 0,
+      entries: [],
+    });
+
+    scheduler.start();
+    // First tick is immediate long tick
+    await clock.tickAsync(100);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetchStub.callCount).to.equal(1);
+
+    // Advance 60 seconds -> should still be short tick (not long)
+    await clock.tickAsync(60000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetchStub.callCount).to.equal(1);
+
+    // Advance another 60 seconds -> total 120s -> long tick
+    await clock.tickAsync(60000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetchStub.callCount).to.equal(2);
+
+    fetchStub.restore();
+  });
+
+  it('short tick skips dispatch when no local entries exist', async () => {
+    const ctx = makeContext();
+    auth.init(ctx.secrets);
+    await ctx.secrets.store('kimiStatusPro.apiKey', 'sk-test');
+
+    const quota = {
+      weeklyLimit: 100_000_000, weeklyUsed: 25_000_000, weeklyUsedPct: 25, weeklyResetAt: Date.now() + 86400000,
+      windowLimit: 200, windowUsed: 50, windowRemaining: 150, windowUsedPct: 10, windowResetAt: Date.now() + 18000000,
+      parallelLimit: 30,
+    };
+    const fetchStub = sinon.stub(api, 'fetchQuota').resolves({ ok: true, data: quota });
+    sinon.stub(cache, 'write').resolves();
+
+    const localUsage = LocalUsageService.getInstance();
+    const getUsageStub = sinon.stub(localUsage, 'getLocalUsage');
+    // First long tick: normal usage with entries
+    getUsageStub.onCall(0).resolves({
+      tokensToday: 1_000_000, costToday: 5, requestsToday: 3,
+      tokensIn5h: 25_000_000, tokensOut5h: 5_000_000, tokensCacheRead5h: 1_000, tokensCacheCreate5h: 500,
+      requests5h: 5,
+      tokensIn7d: 25_000_000, tokensOut7d: 5_000_000, tokensCacheRead7d: 1_000, tokensCacheCreate7d: 500,
+      cost7d: 10, requests7d: 5,
+      cost5h: 5,
+      tokensThisCycle: 25_000_000, costThisCycle: 10, requestsThisCycle: 5,
+      entries: [{ timestamp: Date.now(), inputOther: 100, output: 50, inputCacheRead: 10, inputCacheCreation: 5, cost: 0.01, messageId: null }],
+    });
+    // Short tick: no local cache files (entries empty)
+    getUsageStub.onCall(1).resolves({
+      tokensToday: 0, costToday: 0, requestsToday: 0,
+      tokensIn5h: 0, tokensOut5h: 0, tokensCacheRead5h: 0, tokensCacheCreate5h: 0,
+      requests5h: 0,
+      tokensIn7d: 0, tokensOut7d: 0, tokensCacheRead7d: 0, tokensCacheCreate7d: 0,
+      cost7d: 0, requests7d: 0,
+      cost5h: 0,
+      tokensThisCycle: 0, costThisCycle: 0, requestsThisCycle: 0,
+      entries: [],
+    });
+
+    scheduler.start();
+    // First long tick
+    await clock.tickAsync(100);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const afterLong = store.getState();
+    expect(afterLong.localEstimate).to.not.be.null;
+    expect(afterLong.localEstimate!.weeklyPct).to.equal(25);
+
+    // Short tick with no entries -> should NOT overwrite API percentage
+    await clock.tickAsync(5000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const afterShort = store.getState();
+    expect(afterShort.localEstimate).to.not.be.null;
+    expect(afterShort.localEstimate!.weeklyPct).to.equal(25);
+
+    fetchStub.restore();
+  });
 });
+

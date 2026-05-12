@@ -18,13 +18,15 @@ import {
   isCalibrationValid,
 } from '../calc';
 
-const LONG_MS = 60_000;
-
 export class Scheduler {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private lastLongTick = 0;
   private readonly config = ConfigService.getInstance();
+
+  private get longMs(): number {
+    return this.config.refreshIntervalSeconds * 1000;
+  }
 
   constructor(
     private store: Store,
@@ -38,7 +40,7 @@ export class Scheduler {
     if (this.running) return;
     this.running = true;
     // Ensure first tick is a long tick so we fetch API data immediately
-    this.lastLongTick = Date.now() - LONG_MS;
+    this.lastLongTick = Date.now() - this.longMs;
     // First tick immediately (fetch API data as soon as possible)
     this.schedule(Date.now());
   }
@@ -53,7 +55,7 @@ export class Scheduler {
     if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
     // Reset lastLongTick so the next tick is guaranteed to be a long tick
-    this.lastLongTick = Date.now() - LONG_MS;
+    this.lastLongTick = Date.now() - this.longMs;
     this.schedule(Date.now() + 50);
   }
 
@@ -66,7 +68,7 @@ export class Scheduler {
   private async tick(): Promise<void> {
     if (!this.running) return;
     const now = Date.now();
-    const isLong = now - this.lastLongTick >= LONG_MS;
+    const isLong = now - this.lastLongTick >= this.longMs;
 
     try {
       if (isLong) {
@@ -80,7 +82,7 @@ export class Scheduler {
     }
 
     // Schedule next tick: whichever comes first (short or long)
-    const nextLong = this.lastLongTick + LONG_MS;
+    const nextLong = this.lastLongTick + this.longMs;
     const nextShort = now + this.config.shortRefreshIntervalSeconds * 1000;
     this.schedule(Math.min(nextLong, nextShort));
   }
@@ -98,6 +100,12 @@ export class Scheduler {
       windowResetAtMs: quota?.windowResetAt,
       dataRetentionDays: this.config.dataRetentionDays,
     });
+
+    // Skip short tick when no local data is available to avoid overwriting
+    // API percentages with zeros.
+    if (localUsage.entries.length === 0) {
+      return;
+    }
 
     const calibration = state.localEstimate
       ? {
@@ -169,28 +177,12 @@ export class Scheduler {
 
     if (result.ok && result.data) {
       const apiData = result.data;
+      const oldQuota = this.store.getState().quota;
 
       const localUsage = await this.localUsageService.getLocalUsage({
         weeklyResetAtMs: apiData.weeklyResetAt,
         windowResetAtMs: apiData.windowResetAt,
         dataRetentionDays: this.config.dataRetentionDays,
-      });
-
-      // Calibrate
-      const tokenCapacity = calibrateTokenCapacity(apiData.weeklyUsedPct, localUsage.tokensThisCycle);
-      const windowCostCapacity = calibrateWindowCostCapacity(apiData.windowUsedPct, localUsage.cost5h);
-
-      // Write cache with calibration
-      await this.cacheService.write({
-        quota: apiData,
-        fetchedAt: Date.now(),
-        calibration: {
-          tokenCapacity,
-          windowCostCapacity,
-          calibratedAt: Date.now(),
-          reset5hAt: apiData.windowResetAt,
-          reset7dAt: apiData.weeklyResetAt,
-        },
       });
 
       // 百分数平稳化：若本地估算值四舍五入后的整数与 API 返回的整数一致，
@@ -206,6 +198,31 @@ export class Scheduler {
           windowPct = currentEstimate.windowPct;
         }
       }
+      // 若 API 返回了整数但旧 quota 仍保留更精细的小数位，且整数部分一致，
+      // 也保留旧 quota 的精度（避免首次创建 localEstimate 时把 12.1% 重置为 12%）
+      if (oldQuota && Math.round(oldQuota.weeklyUsedPct) === apiData.weeklyUsedPct && weeklyPct === apiData.weeklyUsedPct) {
+        weeklyPct = oldQuota.weeklyUsedPct;
+      }
+      if (oldQuota && Math.round(oldQuota.windowUsedPct) === apiData.windowUsedPct && windowPct === apiData.windowUsedPct) {
+        windowPct = oldQuota.windowUsedPct;
+      }
+
+      // Calibrate using the smoothed percentages so short ticks preserve the fine-grained value
+      const tokenCapacity = calibrateTokenCapacity(weeklyPct, localUsage.tokensThisCycle);
+      const windowCostCapacity = calibrateWindowCostCapacity(windowPct, localUsage.cost5h);
+
+      // Write cache with calibration
+      await this.cacheService.write({
+        quota: apiData,
+        fetchedAt: Date.now(),
+        calibration: {
+          tokenCapacity,
+          windowCostCapacity,
+          calibratedAt: Date.now(),
+          reset5hAt: apiData.windowResetAt,
+          reset7dAt: apiData.weeklyResetAt,
+        },
+      });
 
       this.store.dispatch({ type: 'API_SUCCESS', payload: apiData });
       this.store.dispatch({

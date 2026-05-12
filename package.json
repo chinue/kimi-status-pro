@@ -2,7 +2,7 @@
   "name": "kimi-status-pro",
   "displayName": "KimiStatusPro",
   "description": "Monitor Kimi Code quota usage in real-time",
-  "version": "0.1.7",
+  "version": "0.1.9",
   "publisher": "kayuii",
   "license": "MIT",
   "repository": {
