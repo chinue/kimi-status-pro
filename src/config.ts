@@ -1,4 +1,5 @@
 // DESIGN: v2-phase2-implementation.md#configts
+// AGENTS: fmt->calc.ts | err->try-catch | i18n->makeT() | no-disk-IO
 import * as vscode from 'vscode';
 import { DisplayMode, LanguageSetting } from './types';
 

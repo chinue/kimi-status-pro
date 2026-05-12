@@ -1,3 +1,4 @@
+// AGENTS: pure-fn | fmt-here | no-side-effect
 import { QuotaData, TokenPricing, AppState } from './types';
 
 export interface UtilizationResult {

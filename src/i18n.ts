@@ -1,4 +1,5 @@
 // DESIGN: CODING_STANDARDS.md#5-i18n-强制规范
+// AGENTS: bilingual-en+zh | no-hardcode
 export type Locale = 'en' | 'zh-CN';
 
 export const dict: Record<Locale, Record<string, string>> = {

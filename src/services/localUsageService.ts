@@ -1,4 +1,5 @@
 // DESIGN: v2-local-estimation-design.md
+// AGENTS: err->try-catch | retention->dataRetentionDays | disk-OK
 // 🔀 Provider boundary: JSONL path and format are Kimi-specific.
 
 import * as fs from 'fs/promises';

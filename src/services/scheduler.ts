@@ -1,4 +1,5 @@
 // DESIGN: v2-phase2-implementation.md#servicesschedulerts
+// AGENTS: fmt->calc.ts | err->try-catch | no-disk-IO
 // 💠 Generic: scheduler logic is provider-agnostic.
 
 import { Store } from '../store';

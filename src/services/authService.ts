@@ -1,4 +1,5 @@
 // 🔀 Provider boundary: token resolution is Kimi-specific.
+// AGENTS: err->try-catch | secret-safe
 
 import * as crypto from 'crypto';
 // DESIGN: v2-phase2-implementation.md#servicesauthservicets

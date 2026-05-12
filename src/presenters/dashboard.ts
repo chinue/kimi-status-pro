@@ -1,4 +1,5 @@
 // DESIGN: v2-dashboard-design.md
+// AGENTS: fmt->calc.ts | err->try-catch | i18n->makeT() | no-disk-IO
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { Store } from '../store';

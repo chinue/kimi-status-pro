@@ -1,4 +1,5 @@
 // DESIGN: v2-phase2-implementation.md#typests
+// AGENTS: keep-minimal | no-logic
 export interface QuotaData {
   weeklyLimit: number;
   weeklyUsed: number;

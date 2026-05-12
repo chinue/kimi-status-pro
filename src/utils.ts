@@ -1,3 +1,4 @@
+// AGENTS: fmt->calc.ts | err->try-catch | no-disk-IO
 import * as vscode from 'vscode';
 import { KimiOAuthCredentials } from './types';
 

@@ -1,4 +1,5 @@
 // DESIGN: v2-phase2-implementation.md#storets
+// AGENTS: pure-reducer | no-mutation
 import { AppState, Action, AuthStatus } from './types';
 
 export const defaultState = (): AppState => ({

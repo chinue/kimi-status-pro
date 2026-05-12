@@ -1,4 +1,5 @@
 // DESIGN: v2-phase2-implementation.md#servicescacheservicets
+// AGENTS: err->try-catch | schema-version->v2 | disk-OK
 // 💠 Generic: cache schema is provider-agnostic.
 
 import * as fs from 'fs/promises';

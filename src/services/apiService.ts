@@ -1,4 +1,5 @@
 // 🔀 Provider boundary: API format is Kimi-specific.
+// AGENTS: err->try-catch | network-fallback
 // If adapting to another provider, replace this module.
 
 // DESIGN: v2-provider-abstraction.md
