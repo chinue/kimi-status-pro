@@ -30,8 +30,11 @@ export class StatusBarPresenter {
   private itemPause: vscode.StatusBarItem;
   private config = ConfigService.getInstance();
   private disposables: vscode.Disposable[] = [];
-  private moonAnimationTimer: NodeJS.Timeout | null = null;
+  private updateAnimInterval: NodeJS.Timeout | null = null;
+  private updateAnimTimeout: NodeJS.Timeout | null = null;
   private moonFrame = 0;
+  private lastSeenWeeklyPct: number | null = null;
+  private lastSeenWindowPct: number | null = null;
 
   constructor(private store: Store) {
     const alignment = vscode.StatusBarAlignment.Right;
@@ -69,21 +72,14 @@ export class StatusBarPresenter {
 
       // When paused, hide data items and show only pause button
       if (state.ui.isPaused) {
-        this.stopMoonAnimation();
+        this.stopUpdateAnimation();
         this.itemWeekly.hide();
         this.itemWindow.hide();
         return;
       }
 
-      // Moon animation while loading (local data scan or API fetch)
-      if (state.isLoading) {
-        this.startMoonAnimation();
-        this.itemWindow.hide();
-        return;
-      }
-      this.stopMoonAnimation();
-
       if (state.authStatus === 'missing') {
+        this.stopUpdateAnimation();
         this.itemWeekly.text = '$(key) Kimi: sign in';
         this.itemWeekly.command = 'kimiStatusPro.signIn';
         this.itemWeekly.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
@@ -93,6 +89,7 @@ export class StatusBarPresenter {
       }
 
       if (state.error && state.authStatus === 'failed') {
+        this.stopUpdateAnimation();
         this.itemWeekly.text = '$(warning) Kimi: auth failed';
         this.itemWeekly.command = 'kimiStatusPro.signIn';
         this.itemWeekly.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
@@ -104,15 +101,30 @@ export class StatusBarPresenter {
       const hasEstimate = !!state.localEstimate;
 
       if (!hasApiData && !hasEstimate) {
+        this.stopUpdateAnimation();
         this.itemWeekly.text = '$(sync~spin) Kimi…';
         this.itemWeekly.backgroundColor = undefined;
         this.itemWindow.hide();
         return;
       }
 
-      // Unified percentage resolution (consistent across statusBar / tooltip / dashboard)
+      // Detect meaningful data changes and trigger moon animation
       const weeklyPct = resolveWeeklyPct(state);
       const windowPct = resolveWindowPct(state);
+      const isFirstData = this.lastSeenWeeklyPct === null && this.lastSeenWindowPct === null;
+      const hasChanged =
+        this.lastSeenWeeklyPct !== weeklyPct ||
+        this.lastSeenWindowPct !== windowPct;
+
+      this.lastSeenWeeklyPct = weeklyPct;
+      this.lastSeenWindowPct = windowPct;
+
+      // Skip animation on first data arrival so user sees the value immediately;
+      // play animation only on subsequent updates.
+      if (hasChanged && !isFirstData) {
+        this.triggerUpdateAnimation();
+      }
+
       const weeklyUtil = weeklyPct / 100;
       const windowUtil = windowPct / 100;
 
@@ -125,25 +137,38 @@ export class StatusBarPresenter {
         ? ' \u26D3\uFE0F\u200D\uD83D\uDCA5'
         : '';
 
+      // Always render itemWindow (even during animation) so it stays visible
       if (this.config.displayMode === 'absolute') {
         if (hasApiData) {
-          this.itemWeekly.text = `\uD83C\uDF18 Kimi:${state.quota!.weeklyUsed}/${state.quota!.weeklyLimit}${errorIndicator}`;
           this.itemWindow.text = `5\uFE0F\u20E3 ${state.quota!.windowUsed}/${state.quota!.windowLimit}${staleIndicator}`;
         } else {
-          this.itemWeekly.text = `\uD83C\uDF18 Kimi:${weeklyPct > 0 ? '~' + formatPercent(weeklyPct, 1) : '—'}${estimateIndicator}${errorIndicator}`;
           this.itemWindow.text = `5\uFE0F\u20E3 ${windowPct > 0 ? '~' + formatPercent(windowPct, 1) : '—'}${staleIndicator}`;
         }
       } else {
-        this.itemWeekly.text = `\uD83C\uDF18 Kimi:${formatPercent(weeklyPct, 1)}${estimateIndicator}${errorIndicator}`;
         this.itemWindow.text = `5\uFE0F\u20E3 ${buildMiniBar(windowUtil, 5)} ${formatPercent(windowPct, 1)}${staleIndicator}`;
+      }
+      this.itemWindow.color = utilizationToColor(windowUtil);
+      this.itemWindow.show();
+
+      // While animation is active, skip itemWeekly normal rendering
+      if (this.updateAnimInterval) {
+        return;
+      }
+
+      if (this.config.displayMode === 'absolute') {
+        if (hasApiData) {
+          this.itemWeekly.text = `\uD83C\uDF18 Kimi:${state.quota!.weeklyUsed}/${state.quota!.weeklyLimit}${errorIndicator}`;
+        } else {
+          this.itemWeekly.text = `\uD83C\uDF18 Kimi:${weeklyPct > 0 ? '~' + formatPercent(weeklyPct, 1) : '—'}${estimateIndicator}${errorIndicator}`;
+        }
+      } else {
+        this.itemWeekly.text = `\uD83C\uDF18 Kimi:${formatPercent(weeklyPct, 1)}${estimateIndicator}${errorIndicator}`;
       }
 
       this.itemWeekly.command = 'kimiStatusPro.showDashboard';
       this.itemWeekly.color = utilizationToColor(weeklyUtil);
-      this.itemWindow.color = utilizationToColor(windowUtil);
       this.itemWeekly.backgroundColor = undefined;
       this.itemWeekly.show();
-      this.itemWindow.show();
 
       // Tooltip: lazy build (async)
       this.buildTooltip(state).then((tooltip) => {
@@ -287,26 +312,52 @@ export class StatusBarPresenter {
     return md;
   }
 
-  private startMoonAnimation(): void {
-    if (this.moonAnimationTimer) return;
+  private triggerUpdateAnimation(): void {
+    const duration = this.config.updateAnimationDurationMs;
+
+    // If animation already running, just reset the end timer (debounce)
+    if (this.updateAnimInterval) {
+      if (this.updateAnimTimeout) {
+        clearTimeout(this.updateAnimTimeout);
+      }
+      this.updateAnimTimeout = setTimeout(() => {
+        this.stopUpdateAnimation();
+        this.render(this.store.getState());
+      }, duration);
+      return;
+    }
+
+    // Start new animation — moon cycles while keeping the live percentage visible
     this.moonFrame = 0;
-    this.itemWeekly.text = `${MOON_FRAMES[0]} Kimi…`;
+    const weeklyPct = this.lastSeenWeeklyPct ?? 0;
+    this.itemWeekly.text = `${MOON_FRAMES[0]} Kimi:${formatPercent(weeklyPct, 1)}`;
     this.itemWeekly.show();
-    this.moonAnimationTimer = setInterval(() => {
+
+    this.updateAnimInterval = setInterval(() => {
       this.moonFrame = (this.moonFrame + 1) % MOON_FRAMES.length;
-      this.itemWeekly.text = `${MOON_FRAMES[this.moonFrame]} Kimi…`;
+      const liveWeeklyPct = this.lastSeenWeeklyPct ?? 0;
+      this.itemWeekly.text = `${MOON_FRAMES[this.moonFrame]} Kimi:${formatPercent(liveWeeklyPct, 1)}`;
     }, MOON_ANIMATION_INTERVAL_MS);
+
+    this.updateAnimTimeout = setTimeout(() => {
+      this.stopUpdateAnimation();
+      this.render(this.store.getState());
+    }, duration);
   }
 
-  private stopMoonAnimation(): void {
-    if (this.moonAnimationTimer) {
-      clearInterval(this.moonAnimationTimer);
-      this.moonAnimationTimer = null;
+  private stopUpdateAnimation(): void {
+    if (this.updateAnimInterval) {
+      clearInterval(this.updateAnimInterval);
+      this.updateAnimInterval = null;
+    }
+    if (this.updateAnimTimeout) {
+      clearTimeout(this.updateAnimTimeout);
+      this.updateAnimTimeout = null;
     }
   }
 
   dispose(): void {
-    this.stopMoonAnimation();
+    this.stopUpdateAnimation();
     this.itemWeekly.dispose();
     this.itemWindow.dispose();
     this.itemPause.dispose();

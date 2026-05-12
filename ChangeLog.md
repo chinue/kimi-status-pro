@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+## [0.1.12] - 2026-05-12
+
+### Fixed
+- **Status bar flickering on every short tick** (`src/presenters/statusBar.ts`, `src/services/scheduler.ts`)
+  - Root cause: `doShortTick` dispatched `LOADING_START/LOADING_END` every 5 seconds, causing the status bar to enter/exit loading state rapidly
+  - Fix: removed loading state dispatch from `doShortTick`; animation is now triggered only when `weeklyPct` or `windowPct` actually changes
+- **Moon animation reset to first frame on every render** (`src/presenters/statusBar.ts`)
+  - Root cause: `startMoonAnimation()` reset `moonFrame = 0` every time `isLoading` flipped, making it look like a strobe instead of a cycle
+  - Fix: replaced `isLoading`-based trigger with data-change detection; existing animation timer is preserved and only the end-timeout is reset when new data arrives during playback
+
+### Added
+- **Configurable update animation duration** (`src/config.ts`, `package.json`)
+  - New setting `kimiStatusPro.updateAnimationDurationMs` (default: 2000ms, range: 500–10000ms)
+  - Controls how long the moon animation plays when data changes; timer resets if another update arrives during playback
+- **Keep itemWindow visible during moon animation** (`src/presenters/statusBar.ts`)
+  - `itemWindow` (5h window) now stays visible and continues to show normal data while `itemWeekly` plays the moon animation
+
 ## [0.1.11] - 2026-05-12
 
 ### Added

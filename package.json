@@ -2,7 +2,7 @@
   "name": "kimi-status-pro",
   "displayName": "KimiStatusPro",
   "description": "Monitor Kimi Code quota usage in real-time",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "publisher": "kayuii",
   "license": "MIT",
   "repository": {
@@ -94,6 +94,13 @@
           "minimum": 30,
           "maximum": 3650,
           "description": "Local usage data retention period in days. Range: 30–3650. Older entries are discarded during scan."
+        },
+        "kimiStatusPro.updateAnimationDurationMs": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 500,
+          "maximum": 10000,
+          "description": "Duration of the moon update animation in milliseconds. Range: 500–10000. When new data arrives during animation, the timer resets."
         },
         "kimiStatusPro._pauseSignal": {
           "type": "number",

@@ -46,6 +46,10 @@ export class ConfigService {
     return Math.max(30, Math.min(3650, this.cfg.get<number>('dataRetentionDays', 365)));
   }
 
+  get updateAnimationDurationMs(): number {
+    return Math.max(500, Math.min(10_000, this.cfg.get<number>('updateAnimationDurationMs', 2_000)));
+  }
+
   get effectiveLanguage(): 'en' | 'zh-CN' {
     const lang = this.language;
     if (lang === 'auto') {

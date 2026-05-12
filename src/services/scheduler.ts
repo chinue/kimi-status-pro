@@ -92,13 +92,10 @@ export class Scheduler {
       return;
     }
 
-    this.store.dispatch({ type: 'LOADING_START' });
+    const state = this.store.getState();
+    const quota = state.quota;
 
-    try {
-      const state = this.store.getState();
-      const quota = state.quota;
-
-      const localUsage = await this.localUsageService.getLocalUsage({
+    const localUsage = await this.localUsageService.getLocalUsage({
       weeklyResetAtMs: quota?.weeklyResetAt,
       windowResetAtMs: quota?.windowResetAt,
       dataRetentionDays: this.config.dataRetentionDays,
@@ -160,9 +157,6 @@ export class Scheduler {
         requestsThisCycle: localUsage.requestsThisCycle,
       },
     });
-    } finally {
-      this.store.dispatch({ type: 'LOADING_END' });
-    }
   }
 
   private async doLongTick(): Promise<void> {

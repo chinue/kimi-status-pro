@@ -35,6 +35,7 @@ describe('StatusBarPresenter', () => {
         parallelLimit: 30,
       },
     });
+    // First data arrival shows the value immediately without animation
     const weeklyText = (presenter as any).itemWeekly.text as string;
     expect(weeklyText).to.include('25.0%');
   });
@@ -48,6 +49,10 @@ describe('StatusBarPresenter', () => {
         parallelLimit: 30,
       },
     });
+    // Stop animation manually before checking normal state
+    (presenter as any).stopUpdateAnimation();
+    (presenter as any).render(store.getState());
+
     // Before pause: data items visible
     expect((presenter as any).itemWeekly.text).to.include('25.0%');
 
